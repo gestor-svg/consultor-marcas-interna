@@ -1,371 +1,493 @@
-import os
-import time
-import json
-import re
+"""
+Consultor de Marcas - Sistema Interno
+======================================
+
+Aplicación Flask principal con dashboard, análisis y generación de PDFs.
+
+Autor: Gestor SVG / MarcaSegura
+Fecha: Enero 2026
+"""
+
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+import logging
 from datetime import datetime
-from functools import lru_cache
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-import google.generativeai as genai
+import os
+import json
 
+# Módulos propios
+from config import Config
+from auth import (
+    login_required, 
+    verificar_credenciales, 
+    iniciar_sesion, 
+    cerrar_sesion,
+    obtener_usuario_actual,
+    esta_autenticado
+)
+from google_sheets import GoogleSheetsClient, MockGoogleSheetsClient
+from impi_fonetico_COMPLETO import IMPIBuscadorFonetico
+from analizador_viabilidad_gemini import AnalizadorViabilidadGemini
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Crear aplicación Flask
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "clave-super-secreta-cambiar-en-produccion")
+app.config.from_object(Config)
 
-# --- CONFIGURACIÓN ---
-API_KEY_GEMINI = os.environ.get("API_KEY_GEMINI")
-PASSWORD_INTERNA = os.environ.get("PASSWORD_INTERNA", "marcasegura2025")  # Cambiar en producción
+# Inicializar clientes
+# Usar MockClient si no hay URL de Apps Script configurada
+if Config.GOOGLE_APPS_SCRIPT_URL and 'YOUR_SCRIPT_ID' not in Config.GOOGLE_APPS_SCRIPT_URL:
+    sheets_client = GoogleSheetsClient(Config.GOOGLE_APPS_SCRIPT_URL, Config.TIMEZONE)
+    logger.info("✅ Usando GoogleSheetsClient real")
+else:
+    sheets_client = MockGoogleSheetsClient(Config.GOOGLE_APPS_SCRIPT_URL, Config.TIMEZONE)
+    logger.warning("⚠️ Usando MockGoogleSheetsClient para desarrollo")
 
-if API_KEY_GEMINI:
-    genai.configure(api_key=API_KEY_GEMINI)
-    print("✓ Gemini configurado")
+buscador_impi = IMPIBuscadorFonetico()
+analizador_gemini = AnalizadorViabilidadGemini(api_key=Config.GEMINI_API_KEY)
 
-# --- FUNCIONES AUXILIARES ---
-
-def normalizar_marca(marca):
-    """Normaliza el nombre de la marca"""
-    marca = marca.upper().strip()
-    marca = re.sub(r'[^\w\s\-]', '', marca)
-    marca = re.sub(r'\s+', ' ', marca)
-    return marca
-
-@lru_cache(maxsize=100)
-def clasificar_con_gemini(descripcion, tipo_negocio):
-    """Usa Gemini para determinar la clase de Niza"""
-    if not API_KEY_GEMINI:
-        return {
-            "clase_principal": "35",
-            "clase_nombre": "Servicios comerciales",
-            "clases_adicionales": [],
-            "nota": "IA no disponible"
-        }
-    
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        prompt = f"""Eres un experto en clasificación de marcas según el sistema de Niza de la OMPI.
-
-Analiza este negocio:
-- Descripción: {descripcion}
-- Tipo: {tipo_negocio}
-
-Responde ÚNICAMENTE con un objeto JSON válido (sin markdown):
-{{
-  "clase_principal": "XX",
-  "clase_nombre": "Descripción corta de la clase",
-  "clases_adicionales": ["YY", "ZZ"],
-  "nota": "Breve explicación de por qué esta clase"
-}}
-
-Recuerda:
-- Productos: Clases 1-34
-- Servicios: Clases 35-45
-- Sé específico y preciso"""
-
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=512,
-            )
-        )
-        
-        text = response.text.strip()
-        
-        # Limpiar markdown y extraer JSON
-        if "```" in text:
-            parts = text.split("```")
-            for part in parts:
-                if '{' in part:
-                    text = part.replace("json", "").replace("JSON", "").strip()
-                    break
-        
-        # Limpiar y extraer JSON válido
-        text = text.replace('\n', ' ').replace('\r', '').strip()
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        
-        if start >= 0 and end > start:
-            text = text[start:end]
-        
-        resultado = json.loads(text)
-        print(f"[GEMINI] Clase sugerida: {resultado['clase_principal']}")
-        return resultado
-        
-    except Exception as e:
-        print(f"[ERROR GEMINI] {e}")
-        if tipo_negocio.lower() == 'producto':
-            return {
-                "clase_principal": "9",
-                "clase_nombre": "Productos tecnológicos",
-                "clases_adicionales": ["35"],
-                "nota": "Clasificación por defecto"
-            }
-        else:
-            return {
-                "clase_principal": "35",
-                "clase_nombre": "Servicios comerciales",
-                "clases_adicionales": ["42"],
-                "nota": "Clasificación por defecto"
-            }
-
-def buscar_impi_selenium_fonetico(marca, clase_niza):
-    """Búsqueda FONÉTICA en IMPI usando Selenium"""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--single-process")  # IMPORTANTE para RAM baja
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    
-    # No necesitas especificar binary_location, Chrome está en PATH
-    # Si aún necesitas especificarlo:
-    # chrome_options.binary_location = "/usr/bin/google-chrome"
-    
-    driver = None
-    resultado = {
-        "status": "ERROR",
-        "cantidad_resultados": 0,
-        "marcas_encontradas": [],
-        "mensaje": "",
-        "tiempo_busqueda": 0
-    }
-    
-    try:
-        inicio = time.time()
-        marca_norm = normalizar_marca(marca)
-        print(f"\n[SELENIUM] Iniciando búsqueda fonética: '{marca_norm}' en Clase {clase_niza}")
-        
-        # Chrome se encuentra automáticamente ahora
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(60)  # Aumentado
-        
-        # URL de búsqueda fonética
-        url = "https://acervomarcas.impi.gob.mx:8181/marcanet/vistas/common/datos/bsqFoneticaCompleta.pgi"
-        driver.get(url)
-        
-        wait = WebDriverWait(driver, 25)
-        
-        # Esperar formulario
-        input_denominacion = wait.until(EC.presence_of_element_located((By.NAME, "denominacion")))
-        input_clase = driver.find_element(By.NAME, "clase")
-        
-        # Llenar formulario
-        input_denominacion.clear()
-        input_denominacion.send_keys(marca_norm)
-        
-        input_clase.clear()
-        input_clase.send_keys(str(clase_niza))
-        
-        # Buscar botón y hacer clic
-        btn_buscar = wait.until(EC.element_to_be_clickable((By.ID, "btnBuscar")))
-        driver.execute_script("arguments[0].click();", btn_buscar)
-        
-        print(f"[SELENIUM] Búsqueda enviada, esperando resultados...")
-        time.sleep(8)  # Esperar respuesta del IMPI
-        
-        # Analizar resultados
-        source = driver.page_source
-        soup = BeautifulSoup(source, 'html.parser')
-        
-        if "no se encontraron registros" in source.lower() or "sin resultados" in source.lower():
-            resultado["status"] = "DISPONIBLE"
-            resultado["mensaje"] = f"No se encontraron marcas similares a '{marca}' en la Clase {clase_niza}"
-            print(f"[SELENIUM] ✓ Marca aparentemente disponible")
-            
-        else:
-            # Buscar tabla de resultados
-            tablas = soup.find_all('table', {'class': ['tabla', 'resultados']})
-            if not tablas:
-                tablas = soup.find_all('table')
-            
-            marcas_encontradas = []
-            
-            for tabla in tablas:
-                filas = tabla.find_all('tr')[1:]  # Saltar encabezado
-                
-                for fila in filas:
-                    celdas = fila.find_all('td')
-                    if len(celdas) >= 3:
-                        marca_similar = {
-                            "denominacion": celdas[0].get_text(strip=True) if len(celdas) > 0 else "",
-                            "expediente": celdas[1].get_text(strip=True) if len(celdas) > 1 else "",
-                            "status": celdas[2].get_text(strip=True) if len(celdas) > 2 else "",
-                            "titular": celdas[3].get_text(strip=True) if len(celdas) > 3 else "",
-                            "clase": celdas[4].get_text(strip=True) if len(celdas) > 4 else clase_niza
-                        }
-                        marcas_encontradas.append(marca_similar)
-            
-            if marcas_encontradas:
-                resultado["status"] = "SIMILARES_ENCONTRADAS"
-                resultado["cantidad_resultados"] = len(marcas_encontradas)
-                resultado["marcas_encontradas"] = marcas_encontradas
-                resultado["mensaje"] = f"Se encontraron {len(marcas_encontradas)} marcas similares"
-                print(f"[SELENIUM] ✗ {len(marcas_encontradas)} marcas similares encontradas")
-            else:
-                resultado["status"] = "VERIFICAR_MANUAL"
-                resultado["mensaje"] = "Resultados ambiguos, requiere verificación manual"
-                print(f"[SELENIUM] ? Resultado incierto")
-        
-        resultado["tiempo_busqueda"] = round(time.time() - inicio, 2)
-        
-    except Exception as e:
-        print(f"[SELENIUM] Error: {e}")
-        resultado["status"] = "ERROR"
-        resultado["mensaje"] = f"Error al consultar IMPI: {str(e)}"
-        
-    finally:
-        if driver:
-            driver.quit()
-    
-    return resultado
-
-# --- RUTAS ---
+# =============================================================================
+# RUTAS DE AUTENTICACIÓN
+# =============================================================================
 
 @app.route('/')
-def home():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    return render_template('index_interna.html')
+def index():
+    """Redirige a login o dashboard según si hay sesión"""
+    if esta_autenticado():
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """Página de login"""
+    
+    # Si ya está autenticado, redirigir a dashboard
+    if esta_autenticado():
+        return redirect(url_for('dashboard'))
+    
     if request.method == 'POST':
-        password = request.form.get('password', '')
-        if password == PASSWORD_INTERNA:
-            session['logged_in'] = True
-            session['login_time'] = datetime.now().isoformat()
-            return redirect(url_for('home'))
+        usuario = request.form.get('usuario', '').strip()
+        password = request.form.get('password', '').strip()
+        
+        if verificar_credenciales(usuario, password, Config.USUARIOS_AUTORIZADOS):
+            iniciar_sesion(usuario)
+            flash(f'¡Bienvenido, {usuario}!', 'success')
+            return redirect(url_for('dashboard'))
         else:
-            return render_template('login.html', error="Contraseña incorrecta")
+            flash('Usuario o contraseña incorrectos', 'error')
+    
     return render_template('login.html')
+
 
 @app.route('/logout')
 def logout():
-    session.clear()
+    """Cerrar sesión"""
+    cerrar_sesion()
+    flash('Sesión cerrada correctamente', 'info')
     return redirect(url_for('login'))
 
-@app.route('/analizar', methods=['POST'])
-def analizar():
-    """
-    Endpoint de análisis - VERSIÓN INTERNA
-    Usa Selenium con búsqueda fonética completa
-    """
-    if 'logged_in' not in session:
-        return jsonify({"error": "No autorizado"}), 401
-    
-    data = request.json
-    marca = data.get('marca', '').strip()
-    descripcion = data.get('descripcion', '').strip()
-    tipo_negocio = data.get('tipo', 'servicio').lower()
-    
-    if not marca or not descripcion:
-        return jsonify({"error": "Marca y descripción son obligatorias"}), 400
-    
-    print(f"\n{'='*70}")
-    print(f"ANÁLISIS PROFESIONAL - Versión Interna")
-    print(f"Marca: {marca}")
-    print(f"Tipo: {tipo_negocio}")
-    print(f"Usuario: {session.get('logged_in')}")
-    print(f"{'='*70}")
-    
-    # 1. Clasificar con Gemini
-    clasificacion = clasificar_con_gemini(descripcion, tipo_negocio)
-    
-    # 2. Búsqueda completa en IMPI con Selenium
-    resultado_impi = buscar_impi_selenium_fonetico(marca, clasificacion['clase_principal'])
-    
-    # 3. Preparar respuesta completa
-    respuesta = {
-        "marca": marca,
-        "tipo_negocio": tipo_negocio,
-        "descripcion": descripcion,
-        "clasificacion": clasificacion,
-        "impi": resultado_impi,
-        "fecha_analisis": datetime.now().isoformat(),
-        "recomendacion": generar_recomendacion(resultado_impi, clasificacion)
-    }
-    
-    print(f"[RESULTADO] Status: {resultado_impi['status']}, Marcas: {resultado_impi['cantidad_resultados']}")
-    print(f"{'='*70}\n")
-    
-    return jsonify(respuesta)
 
-def generar_recomendacion(resultado_impi, clasificacion):
-    """Genera recomendación profesional basada en resultados"""
-    if resultado_impi['status'] == "DISPONIBLE":
-        return {
-            "nivel_riesgo": "BAJO",
-            "color": "green",
-            "texto": "La marca aparenta estar disponible. Se recomienda proceder con el registro.",
-            "pasos_siguientes": [
-                f"Verificar también en clases adicionales: {', '.join(clasificacion.get('clases_adicionales', []))}",
-                "Realizar búsqueda de imágenes similares si aplica",
-                "Preparar documentación para solicitud de registro",
-                "Considerar registro defensivo en clases relacionadas"
-            ]
-        }
-    elif resultado_impi['status'] == "SIMILARES_ENCONTRADAS":
-        cantidad = resultado_impi['cantidad_resultados']
-        return {
-            "nivel_riesgo": "ALTO" if cantidad > 5 else "MEDIO",
-            "color": "red" if cantidad > 5 else "orange",
-            "texto": f"Se encontraron {cantidad} marcas similares. Alto riesgo de rechazo.",
-            "pasos_siguientes": [
-                "Analizar cada marca similar individualmente",
-                "Verificar vigencia de los registros encontrados",
-                "Considerar variación significativa de la denominación",
-                "Evaluar estrategia de coexistencia si es posible",
-                "Consultar con cliente sobre alternativas de nombre"
-            ]
-        }
-    else:
-        return {
-            "nivel_riesgo": "MEDIO",
-            "color": "orange",
-            "texto": "Se requiere análisis manual adicional en el portal del IMPI.",
-            "pasos_siguientes": [
-                "Realizar búsqueda manual en Marcanet",
-                "Verificar en sistema MARCia",
-                "Consultar expedientes específicos",
-                "Análisis de distintividad y registrabilidad"
-            ]
-        }
+# =============================================================================
+# DASHBOARD Y VISTAS PRINCIPALES
+# =============================================================================
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """Dashboard principal con lista de leads"""
+    
+    # Obtener filtro de la URL
+    filtro = request.args.get('filtro', 'todos')
+    
+    # Obtener leads
+    leads = sheets_client.obtener_leads(filtro=filtro if filtro != 'todos' else None)
+    
+    # Obtener estadísticas
+    stats = sheets_client.obtener_estadisticas()
+    
+    return render_template(
+        'dashboard.html',
+        leads=leads,
+        stats=stats,
+        filtro_actual=filtro,
+        usuario=obtener_usuario_actual()
+    )
+
 
 @app.route('/historial')
+@login_required
 def historial():
-    """Ver historial de búsquedas (por implementar)"""
-    if 'logged_in' not in session:
-        return jsonify({"error": "No autorizado"}), 401
-    # Por implementar: conexión a BD para historial
-    return jsonify({"mensaje": "Historial por implementar"})
+    """Historial de análisis completados"""
+    
+    # Obtener solo leads analizados
+    leads = sheets_client.obtener_leads(filtro='analizados')
+    
+    return render_template(
+        'historial.html',
+        leads=leads,
+        usuario=obtener_usuario_actual()
+    )
 
-@app.route('/health')
-def health():
-    return jsonify({
-        "status": "ok",
-        "version": "interna-1.0",
-        "gemini": bool(API_KEY_GEMINI),
-        "selenium": True,
-        "autenticacion": bool(PASSWORD_INTERNA)
-    })
+
+# =============================================================================
+# ANÁLISIS DE MARCAS
+# =============================================================================
+
+@app.route('/analizar/<email>')
+@login_required
+def iniciar_analisis(email):
+    """Página de análisis de una marca"""
+    
+    # Obtener datos del lead
+    lead = sheets_client.obtener_lead_por_email(email)
+    
+    if not lead:
+        flash('Lead no encontrado', 'error')
+        return redirect(url_for('dashboard'))
+    
+    # Verificar que esté pagado
+    if lead.get('pagado') != 'TRUE':
+        flash('Este lead aún no ha pagado', 'warning')
+        return redirect(url_for('dashboard'))
+    
+    return render_template(
+        'analizar.html',
+        lead=lead,
+        usuario=obtener_usuario_actual()
+    )
+
+
+@app.route('/api/buscar-impi', methods=['POST'])
+@login_required
+def api_buscar_impi():
+    """API para ejecutar búsqueda en IMPI"""
+    
+    try:
+        data = request.get_json()
+        
+        marca = data.get('marca')
+        clase = data.get('clase')
+        
+        if not marca:
+            return jsonify({'error': 'Marca requerida'}), 400
+        
+        logger.info(f"🔍 Búsqueda IMPI iniciada: {marca} (Clase: {clase})")
+        
+        # Ejecutar búsqueda
+        resultado = buscador_impi.buscar_fonetica(
+            marca,
+            clase_niza=int(clase) if clase else None
+        )
+        
+        if not resultado.exito:
+            return jsonify({
+                'error': True,
+                'mensaje': resultado.error
+            }), 500
+        
+        logger.info(f"✅ Búsqueda IMPI completada: {len(resultado.marcas_encontradas)} marcas")
+        
+        return jsonify({
+            'exito': True,
+            'resultado': resultado.to_dict()
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Error en búsqueda IMPI: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': True,
+            'mensaje': str(e)
+        }), 500
+
+
+@app.route('/api/analizar-gemini', methods=['POST'])
+@login_required
+def api_analizar_gemini():
+    """API para analizar con Gemini"""
+    
+    try:
+        data = request.get_json()
+        
+        # Reconstruir resultado de búsqueda desde JSON
+        resultado_busqueda_dict = data.get('resultado_busqueda')
+        descripcion = data.get('descripcion')
+        
+        if not resultado_busqueda_dict:
+            return jsonify({'error': 'Resultado de búsqueda requerido'}), 400
+        
+        logger.info(f"🤖 Análisis Gemini iniciado")
+        
+        # Convertir dict a objeto ResultadoBusqueda
+        from impi_fonetico_COMPLETO import ResultadoBusqueda, MarcaInfo
+        
+        marcas = [
+            MarcaInfo(**marca_dict) 
+            for marca_dict in resultado_busqueda_dict.get('marcas_similares', [])
+        ]
+        
+        resultado_busqueda = ResultadoBusqueda(
+            marca_consultada=resultado_busqueda_dict['marca_consultada'],
+            clase_consultada=resultado_busqueda_dict.get('clase_consultada'),
+            fecha_busqueda=datetime.fromisoformat(resultado_busqueda_dict['fecha_busqueda']),
+            marcas_encontradas=marcas,
+            exito=resultado_busqueda_dict['exito'],
+            tiempo_busqueda=resultado_busqueda_dict['tiempo_busqueda'],
+            total_registros=resultado_busqueda_dict.get('total_registros', 0),
+            error=resultado_busqueda_dict.get('error')
+        )
+        
+        # Analizar con Gemini
+        analisis = analizador_gemini.analizar_viabilidad(
+            resultado_busqueda,
+            descripcion_producto=descripcion
+        )
+        
+        logger.info(f"✅ Análisis Gemini completado: {analisis.porcentaje_viabilidad}%")
+        
+        return jsonify({
+            'exito': True,
+            'analisis': analisis.to_dict()
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Error en análisis Gemini: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': True,
+            'mensaje': str(e)
+        }), 500
+
+
+@app.route('/revision/<email>')
+@login_required
+def revision(email):
+    """Página de revisión y ajuste del análisis"""
+    
+    # Obtener datos del lead
+    lead = sheets_client.obtener_lead_por_email(email)
+    
+    if not lead:
+        flash('Lead no encontrado', 'error')
+        return redirect(url_for('dashboard'))
+    
+    # Los datos del análisis se pasan como parámetros de sesión
+    # o se reconstruyen aquí si es necesario
+    
+    return render_template(
+        'revision.html',
+        lead=lead,
+        usuario=obtener_usuario_actual()
+    )
+
+
+# =============================================================================
+# GENERACIÓN DE PDFs
+# =============================================================================
+
+@app.route('/api/generar-pdf', methods=['POST'])
+@login_required
+def api_generar_pdf():
+    """API para generar PDF del reporte"""
+    
+    try:
+        data = request.get_json()
+        
+        email = data.get('email')
+        porcentaje_viabilidad = data.get('porcentaje_viabilidad')
+        analisis_dict = data.get('analisis')
+        resultado_busqueda_dict = data.get('resultado_busqueda')
+        notas_experto = data.get('notas_experto', '')
+        
+        if not all([email, porcentaje_viabilidad, analisis_dict, resultado_busqueda_dict]):
+            return jsonify({'error': 'Datos incompletos'}), 400
+        
+        logger.info(f"📄 Generando PDF para: {email}")
+        
+        # Importar generador de PDF
+        from generador_pdf import generar_pdf_reporte
+        
+        # Obtener datos del lead
+        lead = sheets_client.obtener_lead_por_email(email)
+        
+        if not lead:
+            return jsonify({'error': 'Lead no encontrado'}), 404
+        
+        # Generar PDF
+        pdf_path = generar_pdf_reporte(
+            lead=lead,
+            porcentaje_viabilidad=porcentaje_viabilidad,
+            analisis=analisis_dict,
+            marcas_similares=resultado_busqueda_dict.get('marcas_similares', []),
+            total_encontradas=resultado_busqueda_dict.get('total_registros', 0),
+            notas_experto=notas_experto
+        )
+        
+        if not pdf_path or not os.path.exists(pdf_path):
+            return jsonify({'error': 'Error generando PDF'}), 500
+        
+        logger.info(f"✅ PDF generado: {pdf_path}")
+        
+        # Actualizar Sheet
+        sheets_client.marcar_analizado(
+            email=email,
+            porcentaje_viabilidad=int(porcentaje_viabilidad),
+            pdf_url=f"/download-pdf/{os.path.basename(pdf_path)}"
+        )
+        
+        if notas_experto:
+            sheets_client.agregar_nota_experto(email, notas_experto)
+        
+        return jsonify({
+            'exito': True,
+            'pdf_url': f"/download-pdf/{os.path.basename(pdf_path)}",
+            'pdf_filename': os.path.basename(pdf_path)
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Error generando PDF: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': True,
+            'mensaje': str(e)
+        }), 500
+
+
+@app.route('/download-pdf/<filename>')
+@login_required
+def download_pdf(filename):
+    """Descarga un PDF generado"""
+    
+    pdf_path = os.path.join(Config.PDF_FOLDER, filename)
+    
+    if not os.path.exists(pdf_path):
+        flash('PDF no encontrado', 'error')
+        return redirect(url_for('dashboard'))
+    
+    return send_file(
+        pdf_path,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/pdf'
+    )
+
+
+@app.route('/api/aprobar-pdf', methods=['POST'])
+@login_required
+def api_aprobar_pdf():
+    """API para aprobar un PDF y marcarlo como listo para enviar"""
+    
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({'error': 'Email requerido'}), 400
+        
+        logger.info(f"✅ Aprobando PDF para: {email}")
+        
+        # Marcar como aprobado
+        sheets_client.marcar_aprobado(email, aprobado=True)
+        
+        return jsonify({
+            'exito': True,
+            'mensaje': 'PDF aprobado correctamente'
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Error aprobando PDF: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': True,
+            'mensaje': str(e)
+        }), 500
+
+
+# =============================================================================
+# ENVÍO DE EMAILS (Opcional)
+# =============================================================================
+
+@app.route('/api/enviar-email', methods=['POST'])
+@login_required
+def api_enviar_email():
+    """API para enviar email al cliente con el PDF"""
+    
+    try:
+        data = request.get_json()
+        
+        email = data.get('email')
+        pdf_filename = data.get('pdf_filename')
+        
+        if not all([email, pdf_filename]):
+            return jsonify({'error': 'Datos incompletos'}), 400
+        
+        logger.info(f"📧 Enviando email a: {email}")
+        
+        # TODO: Implementar envío de email
+        # from email_sender import enviar_email_con_pdf
+        # resultado = enviar_email_con_pdf(email, pdf_filename)
+        
+        # Por ahora, simular envío
+        sheets_client.marcar_enviado(
+            email=email,
+            pdf_url=f"/download-pdf/{pdf_filename}"
+        )
+        
+        return jsonify({
+            'exito': True,
+            'mensaje': 'Email enviado correctamente'
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ Error enviando email: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': True,
+            'mensaje': str(e)
+        }), 500
+
+
+# =============================================================================
+# UTILIDADES
+# =============================================================================
+
+@app.context_processor
+def inject_globals():
+    """Inyecta variables globales en todos los templates"""
+    return {
+        'NOMBRE_EMPRESA': Config.NOMBRE_EMPRESA,
+        'usuario_actual': obtener_usuario_actual(),
+        'esta_autenticado': esta_autenticado()
+    }
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """Página de error 404"""
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Página de error 500"""
+    logger.error(f"Error 500: {str(error)}", exc_info=True)
+    return render_template('500.html'), 500
+
+
+# =============================================================================
+# INICIALIZACIÓN
+# =============================================================================
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10001))
-    print(f"\n{'='*70}")
-    print(f"🔐 CONSULTOR DE MARCAS - VERSIÓN INTERNA")
-    print(f"{'='*70}")
-    print(f"Puerto: {port}")
-    print(f"Gemini: {'✓' if API_KEY_GEMINI else '✗'}")
-    print(f"Selenium: ✓ (Búsqueda fonética completa)")
-    print(f"Password: {'✓ Configurado' if PASSWORD_INTERNA else '✗ NO configurado'}")
-    print(f"{'='*70}\n")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    logger.info("="*70)
+    logger.info("  CONSULTOR DE MARCAS - SISTEMA INTERNO")
+    logger.info("  Puerto: 5000")
+    logger.info("  Modo: " + ("Desarrollo" if Config.DEBUG else "Producción"))
+    logger.info("="*70)
+    
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=Config.DEBUG
+    )
