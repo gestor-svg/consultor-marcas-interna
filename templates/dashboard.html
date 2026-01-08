@@ -16,7 +16,7 @@
                 <p class="text-gray-600 mt-2">Gestión de leads y análisis de marcas</p>
             </div>
             <div class="text-right">
-                <p class="text-sm text-gray-500">Última actualización</p>
+                <p class="text-sm text-gray-500">Sistema Interno</p>
             </div>
         </div>
     </div>
@@ -200,3 +200,16 @@
                         </td>
                     </tr>
                     {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="px-6 py-12 text-center">
+            <i class="fas fa-inbox text-gray-300 text-6xl mb-4"></i>
+            <p class="text-gray-500 text-lg">No hay leads con el filtro seleccionado</p>
+        </div>
+        {% endif %}
+    </div>
+    
+</div>
+{% endblock %}
