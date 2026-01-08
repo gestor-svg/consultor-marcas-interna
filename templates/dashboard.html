@@ -161,12 +161,12 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            {% if lead.analizado == 'TRUE' %}
+                            {% if lead.analizado == 'TRUE' or lead.analizado == true %}
                                 <span class="badge badge-success">
                                     <i class="fas fa-check-circle mr-1"></i>
                                     Analizado
                                 </span>
-                            {% elif lead.pagado == 'TRUE' %}
+                            {% elif lead.pagado == 'TRUE' or lead.pagado == true %}
                                 <span class="badge badge-warning">
                                     <i class="fas fa-clock mr-1"></i>
                                     Pagado
@@ -179,13 +179,13 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            {% if lead.pagado == 'TRUE' and lead.analizado != 'TRUE' %}
+                            {% if (lead.pagado == 'TRUE' or lead.pagado == true) and (lead.analizado != 'TRUE' and lead.analizado != true) %}
                                 <a href="{{ url_for('iniciar_analisis', email=lead.email) }}" 
                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 transition">
                                     <i class="fas fa-search mr-2"></i>
                                     Analizar
                                 </a>
-                            {% elif lead.analizado == 'TRUE' and lead.pdf_url %}
+                            {% elif (lead.analizado == 'TRUE' or lead.analizado == true) and lead.pdf_url %}
                                 <a href="{{ lead.pdf_url }}" 
                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition">
                                     <i class="fas fa-file-pdf mr-2"></i>
@@ -198,18 +198,3 @@
                                 </span>
                             {% endif %}
                         </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="px-6 py-12 text-center">
-            <i class="fas fa-inbox text-gray-300 text-6xl mb-4"></i>
-            <p class="text-gray-500 text-lg">No hay leads con el filtro seleccionado</p>
-        </div>
-        {% endif %}
-    </div>
-    
-</div>
-{% endblock %}
