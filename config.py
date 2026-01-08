@@ -39,7 +39,7 @@ class Config:
     HOJA_LEADS = 'leads'
     
     # Gemini AI
-    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    GEMINI_API_KEY = os.getenv('API_KEY_GEMINI')
     
     # Email (opcional para envío automático)
     SMTP_HOST = os.getenv('SMTP_HOST', 'smtp.gmail.com')
