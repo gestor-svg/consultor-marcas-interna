@@ -1,4 +1,4 @@
-zador viabilidad gemini · PY
+Analizador viabilidad gemini · PY
 Copiar
 
 """
