@@ -323,7 +323,8 @@ class IMPIBuscadorFonetico:
         total_registros = 0
         
         try:
-            soup = BeautifulSoup(response.content, 'html.parser')
+            # Usar lxml para parsear XML correctamente
+            soup = BeautifulSoup(response.content, 'lxml')
             html_text = response.text
             
             # 1. Detectar total de registros (múltiples métodos)
