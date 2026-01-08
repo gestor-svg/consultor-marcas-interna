@@ -1,6 +1,3 @@
-Analizador viabilidad gemini · PY
-Copiar
-
 """
 Analizador de Viabilidad con Gemini
 ====================================
