@@ -34,7 +34,9 @@ instance/
 # Environment variables
 .env
 .env.local
+.env.production
 .flaskenv
+
 
 # IDE
 .vscode/
@@ -66,3 +68,7 @@ flask_session/
 # Temporary files
 tmp/
 temp/
+
+# API Keys
+*api_key*
+*API_KEY*
