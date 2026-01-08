@@ -27,7 +27,7 @@ class ConfigGemini:
     
     # API Key debe venir de variable de entorno
     import os
-    API_KEY = os.getenv('GEMINI_API_KEY')
+    API_KEY = os.getenv('API_KEY_GEMINI')
     MODEL = "gemini-pro"
     
     # Parámetros de generación
