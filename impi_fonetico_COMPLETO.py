@@ -346,18 +346,33 @@ class IMPIBuscadorFonetico:
                 logger.info(f"📦 Encontrados {len(updates)} updates en la respuesta XML")
                 
                 for idx, update in enumerate(updates):
-                    if not update.string:
+                    # Extraer contenido - puede ser string directo o dentro de CDATA
+                    html_content = None
+                    
+                    if update.string:
+                        html_content = str(update.string)
+                    elif update.get_text():
+                        html_content = update.get_text()
+                    elif len(update.contents) > 0:
+                        # Tomar el primer elemento de contenido
+                        html_content = str(update.contents[0])
+                    
+                    if not html_content:
+                        logger.info(f"⏭️ Update #{idx+1} vacío, saltando...")
                         continue
                     
-                    html_content = str(update.string)
+                    logger.info(f"📦 Update #{idx+1} - Longitud: {len(html_content)} caracteres")
                     
-                    # Buscar si este update contiene la tabla de resultados (sin importar posición)
-                    if 'resultadoExpediente' in html_content or 'tabla-franjas' in html_content:
-                        logger.info(f"✅ Update #{idx+1} contiene resultados! (longitud: {len(html_content)} caracteres)")
-                        
-                        # Mostrar una muestra del medio del contenido (donde suele estar el HTML)
-                        middle_pos = len(html_content) // 2
-                        logger.info(f"📄 Muestra del medio del contenido: {html_content[middle_pos:middle_pos+500]}")
+                    # Verificar si contiene tabla de resultados
+                    contains_results = (
+                        'resultadoExpediente' in html_content or 
+                        'tabla-franjas' in html_content or
+                        'frmBsqFonetica:resultadoExpediente' in html_content or
+                        'ui-datatable-data' in html_content
+                    )
+                    
+                    if contains_results:
+                        logger.info(f"✅ Update #{idx+1} contiene marcadores de resultados!")
                         
                         # Parsear el HTML interno
                         soup = BeautifulSoup(html_content, 'lxml')
