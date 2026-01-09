@@ -316,37 +316,60 @@ class IMPIBuscadorFonetico:
     ) -> Tuple[List[MarcaInfo], int]:
         """
         Parsea los resultados de la búsqueda fonética
-        Aplica técnicas multi-método de la versión pública
+        Maneja respuestas JSF/PrimeFaces AJAX en formato XML
         """
         
         marcas = []
         total_registros = 0
         
         try:
-            # Usar lxml-xml para parsear XML correctamente (no HTML)
-            soup = BeautifulSoup(response.content, 'xml')
             html_text = response.text
             
-            # Debug: Ver primeras líneas de la respuesta
-            logger.debug(f"Primeros 500 caracteres de respuesta: {html_text[:500]}")
+            # INFO: Ver primeras líneas
+            logger.info(f"🔍 Tipo de respuesta: {'XML AJAX' if '<?xml' in html_text[:100] else 'HTML'}")
+            logger.info(f"📏 Longitud: {len(html_text)} caracteres")
             
-            # 1. Detectar total de registros (múltiples métodos)
-            total_registros = self._detectar_total_registros(html_text, soup)
-            logger.info(f"📊 Total de registros detectados: {total_registros}")
-            
-            # 2. Intentar extraer marcas (incluso si total_registros es 0, por si el detector falla)
-            marcas = self._extraer_marcas_de_tabla(soup)
-            
-            # 3. Si encontramos marcas pero total_registros era 0, actualizar
-            if marcas and total_registros == 0:
-                total_registros = len(marcas)
-                logger.info(f"✅ Corregido: Se encontraron {total_registros} marcas en la tabla")
-            
-            # 4. Verificar coherencia
-            if total_registros > 0:
-                logger.info(f"✅ Marcas parseadas: {len(marcas)}")
+            # Verificar si es respuesta AJAX XML de JSF
+            if html_text.strip().startswith('<?xml') and '<partial-response>' in html_text:
+                logger.info("📋 Parseando respuesta AJAX XML de JSF/PrimeFaces")
+                
+                # Parsear XML principal
+                soup_xml = BeautifulSoup(response.content, 'xml')
+                
+                # Buscar el update que contiene el HTML
+                update = soup_xml.find('update')
+                if update and update.string:
+                    # Extraer HTML del CDATA
+                    html_content = str(update.string)
+                    
+                    # Parsear el HTML interno
+                    soup = BeautifulSoup(html_content, 'lxml')
+                    
+                    # Buscar tbody con ID específico
+                    tbody = soup.find('tbody', id='frmBsqFonetica:resultadoExpediente_data')
+                    
+                    if tbody:
+                        # Buscar todas las filas con data-ri (row index)
+                        filas = tbody.find_all('tr', attrs={'data-ri': True})
+                        total_registros = len(filas)
+                        logger.info(f"📊 Encontradas {total_registros} filas de resultados")
+                        
+                        # Parsear cada fila
+                        for fila in filas:
+                            marca = self._parsear_fila_marca(fila)
+                            if marca:
+                                marcas.append(marca)
+                        
+                        logger.info(f"✅ Marcas parseadas exitosamente: {len(marcas)}")
+                    else:
+                        logger.warning("⚠️ No se encontró tbody con resultados")
+                else:
+                    logger.warning("⚠️ No se encontró update en respuesta XML")
             else:
-                logger.info("ℹ️ No se encontraron resultados")
+                # HTML normal - intentar parseo tradicional
+                soup = BeautifulSoup(response.content, 'lxml')
+                marcas = self._extraer_marcas_de_tabla(soup)
+                total_registros = len(marcas)
         
         except Exception as e:
             logger.error(f"Error parseando resultados: {str(e)}", exc_info=True)
