@@ -434,13 +434,7 @@ def api_crear_lead():
                 'mensaje': 'Email inválido'
             }), 400
         
-        # Verificar si el email ya existe
-        lead_existente = sheets_client.obtener_lead_por_email(email)
-        if lead_existente:
-            return jsonify({
-                'error': True,
-                'mensaje': 'Ya existe un lead con este email'
-            }), 400
+        # NOTA: Permitimos emails duplicados porque los despachos pueden usar el mismo email para múltiples marcas
         
         # Preparar datos del lead
         nuevo_lead = {
