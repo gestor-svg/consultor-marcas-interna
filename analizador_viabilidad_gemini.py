@@ -181,73 +181,87 @@ class AnalizadorViabilidadGemini:
         descripcion_producto: Optional[str]
     ) -> str:
         """
-        Genera el prompt para Gemini
+        Genera el prompt para Gemini - versión con análisis inteligente
         """
         
+        total_marcas = len(resultado.marcas_encontradas)
+        
         # Información básica
-        prompt = f"""Eres un experto en derecho de propiedad intelectual y marcas en México. Tu trabajo es analizar la viabilidad de registro de una marca ante el IMPI (Instituto Mexicano de la Propiedad Industrial).
+        prompt = f"""Eres un experto en derecho de propiedad intelectual y marcas en México. Analizas la viabilidad de registro de marcas ante el IMPI.
 
 **MARCA A ANALIZAR:**
-Denominación: {resultado.marca_consultada}
-Clase Niza: {resultado.clase_consultada if resultado.clase_consultada else "No especificada (todas las clases)"}
+Denominación: "{resultado.marca_consultada}"
+Clase Niza: {resultado.clase_consultada if resultado.clase_consultada else "Todas las clases"}
 """
         
-        # Agregar descripción si existe
         if descripcion_producto:
-            prompt += f"Descripción del producto/servicio: {descripcion_producto}\n"
+            prompt += f"Descripción: {descripcion_producto}\n"
         
         prompt += f"""
-**RESULTADOS DE BÚSQUEDA FONÉTICA:**
-Total de marcas similares encontradas: {resultado.total_registros}
-Marcas parseadas y analizables: {len(resultado.marcas_encontradas)}
+**RESULTADOS BÚSQUEDA FONÉTICA IMPI:**
+Se encontraron {total_marcas} marcas similares registradas o en trámite.
 
+**TODAS LAS MARCAS ({total_marcas} total):**
 """
         
-        # Agregar detalles de marcas similares
-        if resultado.marcas_encontradas:
-            prompt += "**MARCAS SIMILARES DETECTADAS:**\n\n"
-            
-            for i, marca in enumerate(resultado.marcas_encontradas[:15], 1):
-                prompt += f"{i}. {marca.denominacion}\n"
-                prompt += f"   - Expediente: {marca.expediente}\n"
-                prompt += f"   - Titular: {marca.titular}\n"
-                prompt += f"   - Clase: {marca.clase}\n"
-                prompt += f"   - Registro: {marca.fecha_registro}\n"
-                prompt += "\n"
-            
-            if len(resultado.marcas_encontradas) > 15:
-                prompt += f"... y {len(resultado.marcas_encontradas) - 15} marcas más.\n\n"
-        else:
-            prompt += "**No se encontraron marcas similares en la búsqueda.**\n\n"
+        # Listar TODAS las marcas para que Gemini las analice
+        for i, marca in enumerate(resultado.marcas_encontradas, 1):
+            prompt += f"\n{i}. {marca.denominacion}"
+            prompt += f"\n   Expediente: {marca.expediente}"
+            if marca.registro:
+                prompt += f" | Registro: {marca.registro}"
+            prompt += f" | Clase: {marca.clase}"
+            prompt += f" | Titular: {marca.titular[:50]}..."
         
-        # Instrucciones de análisis
-        prompt += """
-**TU TAREA:**
+        # Instrucciones críticas
+        prompt += f"""
 
-Analiza estos resultados y proporciona tu respuesta en el siguiente formato JSON EXACTO (sin texto adicional, solo el JSON):
+**TU TAREA CRÍTICA:**
 
-```json
-{
-  "porcentaje_viabilidad": <número entre 0 y 85>,
-  "nivel_riesgo": "<BAJO|MEDIO|ALTO|MUY_ALTO>",
-  "marcas_conflictivas": [
-    {
-      "denominacion": "<nombre de la marca conflictiva>",
+1. **IDENTIFICA** las 15 marcas MÁS CONFLICTIVAS de las {total_marcas} analizadas
+2. **ORDÉNALAS** por nivel de riesgo (más peligrosa primero)
+3. **PRIORIZA**:
+   - Coincidencias EXACTAS (ej: "CAFE LUNA" vs "LUNA CAFE") → RIESGO MUY ALTO
+   - Marcas con REGISTRO vigente (no solo expediente) → MÁS PELIGROSAS
+   - Alta similitud fonética en misma clase → RIESGO ALTO
+   - Similitud moderada → RIESGO MEDIO
+
+4. **CALCULA** viabilidad considerando TODAS las {total_marcas} marcas:
+   - Coincidencia exacta con registro → 15-25%
+   - Similitudes altas múltiples → 30-45%
+   - Similitudes moderadas → 50-65%
+   - Solo similitudes bajas → 70-80%
+
+**RESPONDE EN FORMATO JSON EXACTO (sin markdown, solo JSON):**
+
+{{
+  "porcentaje_viabilidad": <número 15-80>,
+  "nivel_riesgo": "<MUY_ALTO|ALTO|MEDIO|BAJO>",
+  "top_15_conflictivas": [
+    {{
+      "posicion": 1,
+      "denominacion": "<nombre exacto>",
       "expediente": "<número>",
-      "razon_conflicto": "<por qué es conflictiva>",
-      "nivel_conflicto": "<BAJO|MEDIO|ALTO>"
-    }
+      "registro": "<número o vacío>",
+      "razon_conflicto": "<explicación breve>",
+      "nivel_conflicto": "<MUY_ALTO|ALTO|MEDIO|BAJO>"
+    }}
   ],
-  "analisis_detallado": "<análisis profesional en 2-3 párrafos explicando tu evaluación>",
+  "analisis_detallado": "<2-3 párrafos explicando: 1) Por qué ese porcentaje, 2) Marcas más peligrosas, 3) Consideraciones>",
   "recomendaciones": [
-    "<recomendación 1>",
-    "<recomendación 2>",
-    "<recomendación 3>"
+    "<acción concreta 1>",
+    "<acción concreta 2>",
+    "<acción concreta 3>"
   ],
-  "factores_riesgo": [
-    "<factor de riesgo 1>",
-    "<factor de riesgo 2>"
-  ],
+  "factores_riesgo": ["<factor 1>", "<factor 2>"],
+  "factores_favorables": ["<factor 1>", "<factor 2>"],
+  "total_marcas_analizadas": {total_marcas}
+}}
+
+IMPORTANTE: Las "top_15_conflictivas" deben estar ORDENADAS por riesgo descendente (más peligrosa primero)."""
+        
+        return prompt
+    
   "factores_favorables": [
     "<factor favorable 1>",
     "<factor favorable 2>"
@@ -313,13 +327,16 @@ Responde SOLO con el JSON, sin texto adicional antes o después.
             porcentaje = int(data.get('porcentaje_viabilidad', 50))
             porcentaje = max(self.config.VIABILIDAD_MIN, min(porcentaje, self.config.VIABILIDAD_MAX))
             
+            # Obtener marcas conflictivas (usar el nuevo campo o el viejo para compatibilidad)
+            marcas_conflictivas = data.get('top_15_conflictivas', data.get('marcas_conflictivas', []))
+            
             # Crear análisis
             analisis = AnalisisViabilidad(
                 marca_consultada=resultado.marca_consultada,
                 clase_consultada=resultado.clase_consultada,
                 porcentaje_viabilidad=porcentaje,
                 nivel_riesgo=data.get('nivel_riesgo', 'MEDIO'),
-                marcas_conflictivas=data.get('marcas_conflictivas', []),
+                marcas_conflictivas=marcas_conflictivas,
                 analisis_detallado=data.get('analisis_detallado', ''),
                 recomendaciones=data.get('recomendaciones', []),
                 factores_riesgo=data.get('factores_riesgo', []),

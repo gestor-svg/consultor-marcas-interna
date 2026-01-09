@@ -73,12 +73,14 @@ class MarcaInfo:
         clase: str,
         estado: str,
         tipo: Optional[str] = None,
+        registro: Optional[str] = None,  # Número de registro
         fecha_registro: Optional[str] = None,
         fecha_vencimiento: Optional[str] = None,
         similitud_fonetica: Optional[float] = None
     ):
         self.denominacion = denominacion.strip() if denominacion else ""
         self.expediente = expediente.strip() if expediente else ""
+        self.registro = registro.strip() if registro else ""  # Número de registro
         self.titular = titular.strip() if titular else ""
         self.clase = clase.strip() if clase else ""
         self.estado = estado.strip() if estado else ""
@@ -270,47 +272,79 @@ class IMPIBuscadorFonetico:
         clase_niza: Optional[int]
     ) -> Tuple[List[MarcaInfo], int]:
         """
-        Ejecuta la búsqueda fonética
-        
-        Nota: Necesitamos investigar los parámetros exactos del formulario
-        bsqFoneticaCompleta.pgi para completar esto correctamente
+        Ejecuta la búsqueda fonética y obtiene TODAS las páginas de resultados
         """
         
-        # Preparar datos del formulario (nombres exactos del IMPI)
-        # IMPORTANTE: Estos parámetros deben coincidir EXACTAMENTE con los del navegador
-        data = {
-            'javax.faces.partial.ajax': 'true',
-            'javax.faces.source': 'frmBsqFonetica:busquedaId2',
-            'javax.faces.partial.execute': '@all',  # CRÍTICO: debe ser @all, no frmBsqFonetica
-            'javax.faces.partial.render': 'frmBsqFonetica',
-            'frmBsqFonetica:busquedaId2': 'frmBsqFonetica:busquedaId2',  # Submit button
-            'frmBsqFonetica': 'frmBsqFonetica',
-            'frmBsqFonetica:denominacion': marca.strip().upper(),
-        }
+        todas_marcas = []
+        total_registros = 0
+        pagina = 0
+        max_paginas = 20  # Límite de seguridad (20 páginas * 15 = 300 marcas max)
         
-        # Agregar clase si se especificó
-        if clase_niza:
-            data['frmBsqFonetica:clases'] = str(clase_niza)
+        logger.info(f"🔍 Iniciando búsqueda paginada...")
         
-        # Agregar ViewState si lo tenemos
-        if self.viewstate:
-            data['javax.faces.ViewState'] = self.viewstate
+        while pagina < max_paginas:
+            # Preparar datos del formulario
+            data = {
+                'javax.faces.partial.ajax': 'true',
+                'javax.faces.source': 'frmBsqFonetica:busquedaId2' if pagina == 0 else 'frmBsqFonetica:resultadoExpediente',
+                'javax.faces.partial.execute': '@all',
+                'javax.faces.partial.render': 'frmBsqFonetica',
+                'frmBsqFonetica': 'frmBsqFonetica',
+                'frmBsqFonetica:denominacion': marca.strip().upper(),
+            }
+            
+            # Primera página: usar botón de búsqueda
+            if pagina == 0:
+                data['frmBsqFonetica:busquedaId2'] = 'frmBsqFonetica:busquedaId2'
+            else:
+                # Páginas siguientes: usar paginación
+                data['frmBsqFonetica:resultadoExpediente_pagination'] = 'true'
+                data['frmBsqFonetica:resultadoExpediente_first'] = str(pagina * 15)
+                data['frmBsqFonetica:resultadoExpediente_rows'] = '15'
+            
+            if clase_niza:
+                data['frmBsqFonetica:clases'] = str(clase_niza)
+            
+            if self.viewstate:
+                data['javax.faces.ViewState'] = self.viewstate
+            
+            # Hacer petición
+            logger.info(f"📄 Obteniendo página {pagina + 1}...")
+            response = self.session.post(
+                self.config.URL_FONETICA,
+                data=data,
+                timeout=self.config.TIMEOUT_PETICION,
+                allow_redirects=True
+            )
+            
+            response.raise_for_status()
+            
+            # Parsear resultados de esta página
+            marcas_pagina, total = self._parsear_resultados_fonetica(response)
+            
+            if not marcas_pagina:
+                logger.info(f"✅ No hay más resultados. Total obtenido: {len(todas_marcas)} marcas")
+                break
+            
+            todas_marcas.extend(marcas_pagina)
+            total_registros = total if total > 0 else len(todas_marcas)
+            
+            logger.info(f"✅ Página {pagina + 1}: +{len(marcas_pagina)} marcas (total acumulado: {len(todas_marcas)})")
+            
+            # Si obtuvimos menos de 15, es la última página
+            if len(marcas_pagina) < 15:
+                logger.info(f"📄 Última página detectada (menos de 15 resultados)")
+                break
+            
+            # Si ya tenemos todas las marcas del total
+            if total_registros > 0 and len(todas_marcas) >= total_registros:
+                logger.info(f"✅ Todas las marcas obtenidas ({len(todas_marcas)}/{total_registros})")
+                break
+            
+            pagina += 1
         
-        logger.debug(f"POST {self.config.URL_FONETICA}")
-        logger.debug(f"Datos: {data}")
-        
-        # Hacer petición
-        response = self.session.post(
-            self.config.URL_FONETICA,
-            data=data,
-            timeout=self.config.TIMEOUT_PETICION,
-            allow_redirects=True
-        )
-        
-        response.raise_for_status()
-        
-        # Parsear resultados
-        return self._parsear_resultados_fonetica(response)
+        logger.info(f"🎯 Búsqueda completa: {len(todas_marcas)} marcas obtenidas de {total_registros} totales")
+        return todas_marcas, total_registros
     
     def _parsear_resultados_fonetica(
         self,
@@ -335,7 +369,7 @@ class IMPIBuscadorFonetico:
             if html_text.strip().startswith('<?xml') and '<partial-response>' in html_text:
                 logger.info("📋 Parseando respuesta AJAX XML de JSF/PrimeFaces")
                 
-                # CRÍTICO: Extraer CDATA manualmente (BeautifulSoup falla con CDATA grandes)
+                # CRÍTICO: Extraer CDATA manualmente con regex (BeautifulSoup falla con CDATA grandes)
                 cdata_pattern = r'<!\[CDATA\[(.*?)\]\]>'
                 cdata_matches = re.findall(cdata_pattern, html_text, re.DOTALL)
                 
@@ -344,31 +378,51 @@ class IMPIBuscadorFonetico:
                 for idx, cdata_content in enumerate(cdata_matches):
                     logger.info(f"📦 CDATA #{idx+1} - Longitud: {len(cdata_content)} caracteres")
                     
-                    if 'resultadoExpediente' in cdata_content:
-                        logger.info(f"✅ CDATA #{idx+1} contiene resultados!")
+                    # Verificar si contiene tabla de resultados
+                    if 'resultadoExpediente' in cdata_content or 'ui-datatable-data' in cdata_content:
+                        logger.info(f"✅ CDATA #{idx+1} contiene tabla de resultados!")
                         
+                        # Buscar el total de registros en el HTML
+                        # Buscar patrones como "... y 280 marcas más" o similar
+                        total_pattern = r'y\s+(\d+)\s+marcas?\s+más'
+                        total_match = re.search(total_pattern, cdata_content, re.IGNORECASE)
+                        if total_match:
+                            registros_adicionales = int(total_match.group(1))
+                            logger.info(f"📊 Detectados {registros_adicionales} registros adicionales en otras páginas")
+                        
+                        # Parsear el HTML interno
                         soup = BeautifulSoup(cdata_content, 'lxml')
+                        
+                        # Buscar tbody
                         tbody = soup.find('tbody', id='frmBsqFonetica:resultadoExpediente_data')
                         
                         if not tbody:
                             tbody = soup.find('tbody', class_='ui-datatable-data')
+                            if tbody:
+                                logger.info("🔄 Encontrado tbody por clase")
                         
                         if tbody:
                             filas = tbody.find_all('tr', attrs={'data-ri': True})
-                            logger.info(f"📊 Encontradas {len(filas)} filas")
+                            filas_pagina = len(filas)
+                            logger.info(f"📊 Encontradas {filas_pagina} filas en esta página")
                             
+                            # Parsear filas
                             for fila in filas:
                                 marca = self._parsear_fila_marca(fila)
                                 if marca:
                                     marcas.append(marca)
                             
-                            logger.info(f"✅ Marcas parseadas: {len(marcas)}")
+                            # Calcular total real
+                            if total_match:
+                                total_registros = len(marcas) + int(total_match.group(1))
+                            else:
+                                total_registros = len(marcas)
+                            
+                            logger.info(f"✅ Página parseada: {len(marcas)} marcas. Total esperado: {total_registros}")
                             break
                 
                 if not marcas:
-                    logger.warning("⚠️ No se encontraron resultados")
-                if not marcas:
-                    logger.warning("⚠️ No se encontraron resultados en ningún update")
+                    logger.warning("⚠️ No se encontraron resultados en ningún CDATA")
             else:
                 # HTML normal - intentar parseo tradicional
                 soup = BeautifulSoup(response.content, 'lxml')
@@ -504,14 +558,18 @@ class IMPIBuscadorFonetico:
             denominacion_link = denominacion_td.find('a')
             denominacion = denominacion_link.get_text(strip=True) if denominacion_link else denominacion_td.get_text(strip=True)
             
+            # Extraer registro (columna 5)
+            registro = self._extraer_texto_celda(celdas, 5)
+            
             marca = MarcaInfo(
                 denominacion=denominacion,
                 expediente=expediente,
+                registro=registro,  # Número de registro
                 titular=self._extraer_texto_celda(celdas, 3),
                 clase=self._extraer_texto_celda(celdas, 7),
-                estado="",  # El estado no viene en esta tabla, se obtendría del detalle
+                estado="",  # El estado no viene en esta tabla
                 tipo=self._extraer_texto_celda(celdas, 1),  # TS (tipo de signo)
-                fecha_registro=self._extraer_texto_celda(celdas, 5),  # Registro
+                fecha_registro="",  # La fecha no viene en esta tabla
             )
             return marca
         except Exception as e:
