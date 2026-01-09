@@ -94,6 +94,7 @@ class MarcaInfo:
         return {
             'denominacion': self.denominacion,
             'expediente': self.expediente,
+            'registro': self.registro,  # ← AGREGADO
             'titular': self.titular,
             'clase': self.clase,
             'estado': self.estado,
