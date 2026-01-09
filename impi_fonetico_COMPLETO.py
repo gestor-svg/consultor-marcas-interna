@@ -336,48 +336,55 @@ class IMPIBuscadorFonetico:
                 # Parsear XML principal
                 soup_xml = BeautifulSoup(response.content, 'xml')
                 
-                # Buscar el update que contiene el HTML
-                update = soup_xml.find('update')
-                if update and update.string:
-                    # Extraer HTML del CDATA
+                # Parsear XML principal
+                soup_xml = BeautifulSoup(response.content, 'xml')
+                
+                # Buscar TODOS los updates (puede haber múltiples secciones)
+                updates = soup_xml.find_all('update')
+                logger.info(f"📦 Encontrados {len(updates)} updates en la respuesta XML")
+                
+                for idx, update in enumerate(updates):
+                    if not update.string:
+                        continue
+                    
                     html_content = str(update.string)
+                    logger.info(f"📄 Update #{idx+1} - Primeros 500 caracteres: {html_content[:500]}")
                     
-                    # DEBUG: Ver estructura del HTML
-                    logger.info(f"📄 Primeros 1000 caracteres del HTML interno: {html_content[:1000]}")
-                    
-                    # Parsear el HTML interno
-                    soup = BeautifulSoup(html_content, 'lxml')
-                    
-                    # Buscar tbody - probar varios métodos
-                    tbody = soup.find('tbody', id='frmBsqFonetica:resultadoExpediente_data')
-                    
-                    if not tbody:
-                        # Intentar sin ID específico
-                        tbody = soup.find('tbody', class_='ui-datatable-data')
-                        logger.info("🔄 Intentando buscar tbody por clase")
-                    
-                    if not tbody:
-                        # Buscar cualquier tbody
-                        tbody = soup.find('tbody')
-                        logger.info("🔄 Intentando buscar cualquier tbody")
-                    
-                    if tbody:
-                        # Buscar todas las filas con data-ri (row index)
-                        filas = tbody.find_all('tr', attrs={'data-ri': True})
-                        total_registros = len(filas)
-                        logger.info(f"📊 Encontradas {total_registros} filas de resultados")
+                    # Buscar si este update contiene la tabla de resultados
+                    if 'resultadoExpediente' in html_content or 'tabla-franjas' in html_content:
+                        logger.info(f"✅ Update #{idx+1} parece contener resultados!")
                         
-                        # Parsear cada fila
-                        for fila in filas:
-                            marca = self._parsear_fila_marca(fila)
-                            if marca:
-                                marcas.append(marca)
+                        # Parsear el HTML interno
+                        soup = BeautifulSoup(html_content, 'lxml')
                         
-                        logger.info(f"✅ Marcas parseadas exitosamente: {len(marcas)}")
-                    else:
-                        logger.warning("⚠️ No se encontró tbody con resultados")
-                else:
-                    logger.warning("⚠️ No se encontró update en respuesta XML")
+                        # Buscar tbody - probar varios métodos
+                        tbody = soup.find('tbody', id='frmBsqFonetica:resultadoExpediente_data')
+                        
+                        if not tbody:
+                            tbody = soup.find('tbody', class_='ui-datatable-data')
+                            logger.info("🔄 Intentando buscar tbody por clase")
+                        
+                        if not tbody:
+                            tbody = soup.find('tbody')
+                            logger.info("🔄 Intentando buscar cualquier tbody")
+                        
+                        if tbody:
+                            # Buscar todas las filas con data-ri
+                            filas = tbody.find_all('tr', attrs={'data-ri': True})
+                            total_registros = len(filas)
+                            logger.info(f"📊 Encontradas {total_registros} filas de resultados")
+                            
+                            # Parsear cada fila
+                            for fila in filas:
+                                marca = self._parsear_fila_marca(fila)
+                                if marca:
+                                    marcas.append(marca)
+                            
+                            logger.info(f"✅ Marcas parseadas exitosamente: {len(marcas)}")
+                            break  # Ya encontramos los resultados
+                
+                if not marcas:
+                    logger.warning("⚠️ No se encontraron resultados en ningún update")
             else:
                 # HTML normal - intentar parseo tradicional
                 soup = BeautifulSoup(response.content, 'lxml')
