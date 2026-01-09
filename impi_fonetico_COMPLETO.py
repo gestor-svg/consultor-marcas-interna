@@ -335,76 +335,38 @@ class IMPIBuscadorFonetico:
             if html_text.strip().startswith('<?xml') and '<partial-response>' in html_text:
                 logger.info("📋 Parseando respuesta AJAX XML de JSF/PrimeFaces")
                 
-                # Parsear XML principal
-                soup_xml = BeautifulSoup(response.content, 'xml')
+                # CRÍTICO: Extraer CDATA manualmente (BeautifulSoup falla con CDATA grandes)
+                cdata_pattern = r'<!\[CDATA\[(.*?)\]\]>'
+                cdata_matches = re.findall(cdata_pattern, html_text, re.DOTALL)
                 
-                # Parsear XML principal
-                soup_xml = BeautifulSoup(response.content, 'xml')
+                logger.info(f"📦 Encontrados {len(cdata_matches)} bloques CDATA")
                 
-                # Buscar TODOS los updates (puede haber múltiples secciones)
-                updates = soup_xml.find_all('update')
-                logger.info(f"📦 Encontrados {len(updates)} updates en la respuesta XML")
-                
-                for idx, update in enumerate(updates):
-                    # Extraer contenido - puede ser string directo o dentro de CDATA
-                    html_content = None
+                for idx, cdata_content in enumerate(cdata_matches):
+                    logger.info(f"📦 CDATA #{idx+1} - Longitud: {len(cdata_content)} caracteres")
                     
-                    if update.string:
-                        html_content = str(update.string)
-                    elif update.get_text():
-                        html_content = update.get_text()
-                    elif len(update.contents) > 0:
-                        # Tomar el primer elemento de contenido
-                        html_content = str(update.contents[0])
-                    
-                    if not html_content:
-                        logger.info(f"⏭️ Update #{idx+1} vacío, saltando...")
-                        continue
-                    
-                    logger.info(f"📦 Update #{idx+1} - Longitud: {len(html_content)} caracteres")
-                    
-                    # Verificar si contiene tabla de resultados
-                    contains_results = (
-                        'resultadoExpediente' in html_content or 
-                        'tabla-franjas' in html_content or
-                        'frmBsqFonetica:resultadoExpediente' in html_content or
-                        'ui-datatable-data' in html_content
-                    )
-                    
-                    if contains_results:
-                        logger.info(f"✅ Update #{idx+1} contiene marcadores de resultados!")
+                    if 'resultadoExpediente' in cdata_content:
+                        logger.info(f"✅ CDATA #{idx+1} contiene resultados!")
                         
-                        # Parsear el HTML interno
-                        soup = BeautifulSoup(html_content, 'lxml')
-                        
-                        # Buscar tbody - probar varios métodos
+                        soup = BeautifulSoup(cdata_content, 'lxml')
                         tbody = soup.find('tbody', id='frmBsqFonetica:resultadoExpediente_data')
                         
                         if not tbody:
                             tbody = soup.find('tbody', class_='ui-datatable-data')
-                            if tbody:
-                                logger.info("🔄 Encontrado tbody por clase")
-                        
-                        if not tbody:
-                            tbody = soup.find('tbody')
-                            if tbody:
-                                logger.info("🔄 Encontrado tbody genérico")
                         
                         if tbody:
-                            # Buscar todas las filas con data-ri
                             filas = tbody.find_all('tr', attrs={'data-ri': True})
-                            total_registros = len(filas)
-                            logger.info(f"📊 Encontradas {total_registros} filas de resultados")
+                            logger.info(f"📊 Encontradas {len(filas)} filas")
                             
-                            # Parsear cada fila
                             for fila in filas:
                                 marca = self._parsear_fila_marca(fila)
                                 if marca:
                                     marcas.append(marca)
                             
-                            logger.info(f"✅ Marcas parseadas exitosamente: {len(marcas)}")
-                            break  # Ya encontramos los resultados
+                            logger.info(f"✅ Marcas parseadas: {len(marcas)}")
+                            break
                 
+                if not marcas:
+                    logger.warning("⚠️ No se encontraron resultados")
                 if not marcas:
                     logger.warning("⚠️ No se encontraron resultados en ningún update")
             else:
