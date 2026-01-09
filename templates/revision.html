@@ -264,8 +264,17 @@ function cargarDatosEnPagina() {
     // Obtener marcas ordenadas de Gemini o usar las del IMPI
     let marcas = [];
     if (analisisGemini.marcas_conflictivas && analisisGemini.marcas_conflictivas.length > 0) {
-        // Usar las ordenadas por Gemini
-        marcas = analisisGemini.marcas_conflictivas.slice(0, 15);
+        // Usar las ordenadas por Gemini pero enriquecerlas con datos completos del IMPI
+        marcas = analisisGemini.marcas_conflictivas.slice(0, 15).map(marcaConflictiva => {
+            // Buscar la marca completa en los resultados del IMPI
+            const marcaCompleta = resultadoBusqueda.marcas_similares.find(
+                m => m.expediente === marcaConflictiva.expediente ||
+                     m.denominacion === marcaConflictiva.denominacion
+            );
+            
+            // Si la encontramos, usar datos completos; si no, usar lo que tenemos
+            return marcaCompleta || marcaConflictiva;
+        });
     } else {
         // Fallback a las del IMPI
         marcas = resultadoBusqueda.marcas_similares.slice(0, 15);
