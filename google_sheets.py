@@ -112,6 +112,40 @@ class GoogleSheetsClient:
             logger.error(f"Error obteniendo lead: {str(e)}")
             return None
     
+    def obtener_lead_por_id(self, lead_id: int) -> Optional[Dict]:
+        """
+        Obtiene un lead específico por su ID
+        
+        Args:
+            lead_id: ID del lead
+        
+        Returns:
+            Diccionario con los datos del lead o None si no se encuentra
+        """
+        
+        try:
+            params = {
+                'action': 'getLeadById',
+                'id': str(lead_id)
+            }
+            
+            response = requests.get(
+                self.apps_script_url,
+                params=params,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    return data.get('lead')
+            
+            return None
+        
+        except Exception as e:
+            logger.error(f"Error obteniendo lead por ID: {str(e)}")
+            return None
+    
     def actualizar_lead(
         self,
         email: str,

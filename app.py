@@ -139,13 +139,13 @@ def historial():
 # ANÁLISIS DE MARCAS
 # =============================================================================
 
-@app.route('/analizar/<email>')
+@app.route('/analizar/<int:lead_id>')
 @login_required
-def iniciar_analisis(email):
+def iniciar_analisis(lead_id):
     """Página de análisis de una marca"""
     
-    # Obtener datos del lead
-    lead = sheets_client.obtener_lead_por_email(email)
+    # Obtener datos del lead por ID
+    lead = sheets_client.obtener_lead_por_id(lead_id)
     
     if not lead:
         flash('Lead no encontrado', 'error')
@@ -260,13 +260,13 @@ def api_analizar_gemini():
         }), 500
 
 
-@app.route('/revision/<email>')
+@app.route('/revision/<int:lead_id>')
 @login_required
-def revision(email):
+def revision(lead_id):
     """Página de revisión y ajuste del análisis"""
     
-    # Obtener datos del lead
-    lead = sheets_client.obtener_lead_por_email(email)
+    # Obtener datos del lead por ID
+    lead = sheets_client.obtener_lead_por_id(lead_id)
     
     if not lead:
         flash('Lead no encontrado', 'error')
