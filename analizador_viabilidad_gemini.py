@@ -100,17 +100,17 @@ class AnalizadorViabilidadGemini:
         """
         self.config = ConfigGemini()
         
-        # Configurar Gemini con nueva API
+        # Configurar Gemini
         api_key = api_key or self.config.API_KEY
         
         if not api_key:
             raise ValueError("API key de Gemini no configurada. Verifica GEMINI_API_KEY en variables de entorno.")
         
-         # Configurar API key
-   genai.configure(api_key=api_key)
-   
-   # Crear modelo
-   self.model = genai.GenerativeModel(self.config.MODEL)
+        # Configurar API key
+        genai.configure(api_key=api_key)
+        
+        # Crear modelo
+        self.model = genai.GenerativeModel(self.config.MODEL)
         
         logger.info(f"✅ Analizador Gemini inicializado con modelo {self.config.MODEL}")
     
@@ -145,10 +145,10 @@ class AnalizadorViabilidadGemini:
             
             logger.debug(f"Prompt generado: {len(prompt)} caracteres")
             
-            # Llamar a Gemini con nueva API
-           response = self.model.generate_content(
-       prompt,
-       generation_config=genai.GenerationConfig(
+            # Llamar a Gemini
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
                     temperature=self.config.TEMPERATURE,
                     top_p=self.config.TOP_P,
                     top_k=self.config.TOP_K,
