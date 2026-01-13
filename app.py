@@ -40,7 +40,7 @@ from auth import (
     esta_autenticado
 )
 from google_sheets import GoogleSheetsClient, MockGoogleSheetsClient
-from impi_fonetico_COMPLETO import IMPIBuscadorFonetico
+from impi_fonetico_COMPLETO import IMPIBuscadorFonetico, ResultadoBusqueda, MarcaInfo
 from impi_denominacion import buscar_impi_denominacion
 from analizador_viabilidad_gemini import AnalizadorViabilidadGemini
 from utils_public import (
@@ -521,24 +521,49 @@ def api_analizar_gemini():
         
         logger.info(f"\n[ANÁLISIS GEMINI] Marca: {marca_consulta}, Total marcas: {len(marcas_encontradas)}")
         
-        # Analizar con Gemini
-        analisis = analizador_gemini.analizar_viabilidad(
-            marca_consulta=marca_consulta,
-            clase_consulta=clase_consulta,
-            marcas_encontradas=marcas_encontradas
+        # Reconstruir objetos MarcaInfo desde los diccionarios
+        marcas_objetos = []
+        for marca_dict in marcas_encontradas:
+            marca_obj = MarcaInfo(
+                denominacion=marca_dict.get('denominacion', ''),
+                expediente=marca_dict.get('expediente', ''),
+                titular=marca_dict.get('titular', ''),
+                clase=marca_dict.get('clase', ''),
+                estado=marca_dict.get('estado', ''),
+                tipo=marca_dict.get('tipo'),
+                registro=marca_dict.get('registro'),
+                fecha_registro=marca_dict.get('fecha_registro'),
+                fecha_vencimiento=marca_dict.get('fecha_vencimiento'),
+                similitud_fonetica=marca_dict.get('similitud_fonetica')
+            )
+            marcas_objetos.append(marca_obj)
+        
+        # Crear objeto ResultadoBusqueda
+        from datetime import datetime
+        resultado_busqueda = ResultadoBusqueda(
+            marca_consultada=marca_consulta,
+            clase_consultada=int(clase_consulta) if clase_consulta else None,
+            fecha_busqueda=datetime.now(),
+            marcas_encontradas=marcas_objetos,
+            exito=True,
+            tiempo_busqueda=0.0,
+            total_registros=len(marcas_objetos)
         )
         
-        if not analisis["exito"]:
-            return jsonify({
-                "success": False,
-                "error": analisis.get("error", "Error en análisis")
-            }), 500
+        # Analizar con Gemini
+        analisis = analizador_gemini.analizar_viabilidad(resultado_busqueda)
         
-        logger.info(f"[ANÁLISIS GEMINI] ✓ Viabilidad: {analisis.get('porcentaje_viabilidad')}%")
+        # El método retorna un objeto AnalisisViabilidad, no un dict
+        # No necesitamos verificar analisis["exito"] porque si hay error, lanza excepción
+        
+        logger.info(f"[ANÁLISIS GEMINI] ✓ Viabilidad: {analisis.porcentaje_viabilidad}%")
+        
+        # Convertir a diccionario para JSON
+        analisis_dict = analisis.to_dict()
         
         return jsonify({
             "success": True,
-            **analisis
+            **analisis_dict
         })
         
     except Exception as e:
