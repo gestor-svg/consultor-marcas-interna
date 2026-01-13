@@ -1,6 +1,3 @@
-ts · TXT
-Copiar
-
 # Dependencias para Consultor de Marcas - VERSIÓN UNIFICADA
 # Sistema público (funnel) + Sistema interno (dashboard)
 
