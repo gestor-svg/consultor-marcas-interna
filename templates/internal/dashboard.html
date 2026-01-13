@@ -168,12 +168,12 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            {% if lead.analizado == 'TRUE' or lead.analizado == true %}
+                            {% if lead.analizado_normalizado == 'TRUE' %}
                                 <span class="badge badge-success">
                                     <i class="fas fa-check-circle mr-1"></i>
                                     Analizado
                                 </span>
-                            {% elif lead.pagado == 'TRUE' or lead.pagado == true %}
+                            {% elif lead.pagado_normalizado == 'TRUE' %}
                                 <span class="badge badge-warning">
                                     <i class="fas fa-clock mr-1"></i>
                                     Pagado
@@ -186,14 +186,14 @@
                             {% endif %}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            {% if lead.analizado != 'TRUE' and lead.analizado != true %}
+                            {% if lead.analizado_normalizado != 'TRUE' %}
                                 <!-- Mostrar botón Analizar si NO está analizado -->
                                 <a href="{{ url_for('iniciar_analisis', lead_id=lead.id) }}" 
                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 transition">
                                     <i class="fas fa-search mr-2"></i>
                                     Analizar
                                 </a>
-                            {% elif (lead.analizado == 'TRUE' or lead.analizado == true) and lead.pdf_url %}
+                            {% elif lead.analizado_normalizado == 'TRUE' and lead.pdf_url %}
                                 <!-- Mostrar botón Ver PDF si está analizado -->
                                 <a href="{{ lead.pdf_url }}" 
                                    class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition">
