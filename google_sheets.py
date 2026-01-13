@@ -90,15 +90,21 @@ class GoogleSheetsClient:
             # Normalizar valores booleanos para comparación consistente
             for lead in leads:
                 # Normalizar 'pagado'
-                pagado_val = str(lead.get('pagado', '')).upper()
-                if pagado_val in ['TRUE', 'SI', 'YES', '1'] or lead.get('pagado') is True:
+                pagado_raw = lead.get('pagado', '')
+                # Convertir a string solo si no es None o vacío
+                if pagado_raw is None or pagado_raw == '':
+                    lead['pagado_normalizado'] = 'FALSE'
+                elif pagado_raw is True or str(pagado_raw).upper() in ['TRUE', 'SI', 'YES', '1']:
                     lead['pagado_normalizado'] = 'TRUE'
                 else:
                     lead['pagado_normalizado'] = 'FALSE'
                 
                 # Normalizar 'analizado'
-                analizado_val = str(lead.get('analizado', '')).upper()
-                if analizado_val in ['TRUE', 'SI', 'YES', '1'] or lead.get('analizado') is True:
+                analizado_raw = lead.get('analizado', '')
+                # Convertir a string solo si no es None o vacío
+                if analizado_raw is None or analizado_raw == '':
+                    lead['analizado_normalizado'] = 'FALSE'
+                elif analizado_raw is True or str(analizado_raw).upper() in ['TRUE', 'SI', 'YES', '1']:
                     lead['analizado_normalizado'] = 'TRUE'
                 else:
                     lead['analizado_normalizado'] = 'FALSE'

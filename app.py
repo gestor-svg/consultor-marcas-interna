@@ -477,13 +477,13 @@ def api_buscar_impi():
         # Ejecutar búsqueda fonética (puede tardar ~30 seg)
         resultado = buscador_impi.buscar_fonetica(marca, clase_niza=clase if clase else None)
         
-        if not resultado["exito"]:
+        if not resultado.exito:
             return jsonify({
                 "success": False,
-                "error": resultado.get("error", "Error en búsqueda")
+                "error": resultado.error or "Error en búsqueda"
             }), 500
         
-        marcas = resultado.get("marcas", [])
+        marcas = resultado.marcas_encontradas
         
         logger.info(f"[BÚSQUEDA FONÉTICA] ✓ {len(marcas)} marcas encontradas")
         
@@ -491,7 +491,7 @@ def api_buscar_impi():
             "success": True,
             "total_marcas": len(marcas),
             "marcas": [marca.to_dict() for marca in marcas],
-            "mensaje": resultado.get("mensaje", "")
+            "tiempo_busqueda": resultado.tiempo_busqueda
         })
         
     except Exception as e:
