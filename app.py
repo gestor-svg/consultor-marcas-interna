@@ -373,11 +373,20 @@ def dashboard():
         filtro_pagado = request.args.get('pagado')
         filtro_analizado = request.args.get('analizado')
         
+        logger.info(f"[DASHBOARD] Filtros: pagado={filtro_pagado}, analizado={filtro_analizado}")
+        
         # Obtener leads del sheets
         leads = sheets_client.obtener_leads(filtro_pagado=filtro_pagado, filtro_analizado=filtro_analizado)
         
+        logger.info(f"[DASHBOARD] Leads obtenidos: {len(leads)}")
+        if len(leads) > 0:
+            logger.info(f"[DASHBOARD] Primer lead: {leads[0]}")
+        else:
+            logger.warning("[DASHBOARD] No se obtuvieron leads del Google Sheet")
+        
         # Obtener estadísticas
         stats = sheets_client.obtener_estadisticas()
+        logger.info(f"[DASHBOARD] Estadísticas: {stats}")
         
         usuario_actual = obtener_usuario_actual()
         
@@ -392,6 +401,8 @@ def dashboard():
         
     except Exception as e:
         logger.error(f"Error en dashboard: {e}")
+        import traceback
+        traceback.print_exc()
         flash(f'Error al cargar dashboard: {str(e)}', 'error')
         return render_template('internal/dashboard.html', leads=[], stats={}, error=str(e))
 
@@ -464,7 +475,7 @@ def api_buscar_impi():
         logger.info(f"\n[BÚSQUEDA FONÉTICA] Marca: {marca}, Clase: {clase}")
         
         # Ejecutar búsqueda fonética (puede tardar ~30 seg)
-        resultado = buscador_impi.buscar_marca(marca, clase_niza=clase if clase else None)
+        resultado = buscador_impi.buscar_fonetica(marca, clase_niza=clase if clase else None)
         
         if not resultado["exito"]:
             return jsonify({
