@@ -341,6 +341,55 @@ class GoogleSheetsClient:
             logger.error(f"Error agregando lead: {str(e)}")
             return False
     
+    def agregar_facturacion(self, facturacion_data: Dict) -> bool:
+        """
+        Agrega datos de facturación a la hoja 'facturacion' en Google Sheets
+        
+        Args:
+            facturacion_data: Diccionario con los datos de facturación
+                             Campos esperados: fecha, telefono, email, requiere_factura,
+                             rfc, razon_social, regimen_fiscal, uso_cfdi, codigo_postal
+        
+        Returns:
+            True si se agregó correctamente
+        """
+        
+        try:
+            params = {
+                'action': 'addFacturacion'
+            }
+            
+            # Agregar fecha si no existe
+            if 'fecha' not in facturacion_data:
+                facturacion_data['fecha'] = datetime.now(self.timezone).strftime('%Y-%m-%d')
+            if 'hora' not in facturacion_data:
+                facturacion_data['hora'] = datetime.now(self.timezone).strftime('%H:%M:%S')
+            
+            response = requests.post(
+                self.apps_script_url,
+                json={
+                    **params,
+                    'facturacionData': facturacion_data
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    logger.info(f"✅ Facturación agregada exitosamente: {facturacion_data.get('email')}")
+                    return True
+                else:
+                    logger.error(f"Error agregando facturación: {result.get('error', 'Unknown error')}")
+                    return False
+            else:
+                logger.error(f"Error HTTP agregando facturación: {response.status_code}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error agregando facturación: {str(e)}")
+            return False
+    
     def obtener_estadisticas(self) -> Dict:
         """
         Obtiene estadísticas generales de los leads

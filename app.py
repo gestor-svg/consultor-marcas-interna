@@ -246,7 +246,7 @@ def facturacion():
 
 @app.route('/guardar-facturacion', methods=['POST'])
 def guardar_facturacion():
-    """Guarda datos de facturación"""
+    """Guarda datos de facturación en Google Sheets"""
     try:
         data = request.json
         
@@ -264,10 +264,22 @@ def guardar_facturacion():
         if not datos_fact['telefono'] or not datos_fact['email']:
             return jsonify({"error": "Teléfono y email obligatorios"}), 400
         
-        # Guardar en Sheet de facturación (si existe hoja separada)
-        # Por ahora solo guardamos en sesión
+        # Guardar en hoja de facturación de Google Sheets
+        resultado = sheets_client.agregar_facturacion(datos_fact)
+        
+        if not resultado:
+            logger.warning("[FACTURACIÓN] No se pudo guardar en Sheets, continuando...")
+        
+        # Guardar también en sesión para la página de confirmación
         session['facturacion_data'] = datos_fact
         
+        logger.info(f"[FACTURACIÓN] Datos procesados para {datos_fact['email']}")
+        
+        return jsonify({"success": True, "redirect": "/confirmacion"})
+        
+    except Exception as e:
+        logger.error(f"[ERROR guardar_facturacion] {e}")
+        return jsonify({"error": str(e)}), 500
         logger.info(f"[FACTURACIÓN] Datos guardados para {datos_fact['email']}")
         
         return jsonify({"success": True, "redirect": "/confirmacion"})
