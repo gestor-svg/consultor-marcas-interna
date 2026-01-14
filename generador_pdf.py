@@ -1,435 +1,456 @@
 """
-Generador de PDF Profesional
-============================
-
-Genera reportes de viabilidad de marca en formato PDF profesional.
+Generador de PDF para reportes de análisis de marcas
+Utiliza WeasyPrint para convertir HTML a PDF
 """
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image, KeepTogether
-)
-from reportlab.pdfgen import canvas
-from datetime import datetime
 import os
 import logging
+from datetime import datetime
+from weasyprint import HTML, CSS
+from weasyprint.text.fonts import FontConfiguration
 
 logger = logging.getLogger(__name__)
 
 
-def _crear_encabezado_pie(canvas_obj, doc):
-    """Crea encabezado y pie de página"""
-    canvas_obj.saveState()
-    
-    # Pie de página
-    canvas_obj.setFont('Helvetica', 8)
-    canvas_obj.setFillColor(colors.grey)
-    canvas_obj.drawCentredString(
-        letter[0] / 2,
-        0.5 * inch,
-        "MarcaSegura.com.mx | gestor@marcasegura.com.mx | WhatsApp: 523331562224"
-    )
-    
-    # Número de página
-    canvas_obj.drawRightString(
-        letter[0] - 0.75 * inch,
-        0.5 * inch,
-        f"Página {doc.page}"
-    )
-    
-    canvas_obj.restoreState()
-
-
-def clasificar_viabilidad(porcentaje):
-    """Clasifica el porcentaje de viabilidad"""
-    if porcentaje <= 25:
-        return ("MUY BAJA", colors.HexColor('#c0392b'), "No recomendado registrar")
-    elif porcentaje <= 50:
-        return ("BAJA", colors.HexColor('#e67e22'), "Riesgoso, considerar alternativas")
-    elif porcentaje <= 65:
-        return ("MEDIA", colors.HexColor('#f39c12'), "Posible con modificaciones")
-    else:
-        return ("ALTA", colors.HexColor('#27ae60'), "Recomendado para registro")
-
-
-def generar_pdf_reporte(
-    lead: dict,
-    porcentaje_viabilidad: int,
-    analisis: dict,
-    marcas_similares: list,
-    total_encontradas: int,
-    notas_experto: str = "",
-    output_folder: str = None
-) -> str:
+class GeneradorPDF:
     """
-    Genera PDF profesional con el reporte de viabilidad
-    
-    Args:
-        lead: Datos del lead desde Google Sheets
-        porcentaje_viabilidad: Porcentaje de viabilidad (0-85)
-        analisis: Diccionario con análisis de Gemini
-        marcas_similares: Lista de marcas similares encontradas
-        total_encontradas: Total de marcas encontradas
-        notas_experto: Notas adicionales del experto
-        output_folder: Carpeta donde guardar el PDF
-    
-    Returns:
-        Path del PDF generado
+    Genera reportes PDF profesionales a partir de análisis de marcas
     """
     
-    try:
-        # Configurar carpeta de salida
-        if not output_folder:
-            from config import Config
-            output_folder = Config.PDF_FOLDER
+    def __init__(self, pdf_folder: str, logo_path: str = None):
+        """
+        Inicializa el generador de PDF
         
-        os.makedirs(output_folder, exist_ok=True)
+        Args:
+            pdf_folder: Carpeta donde se guardarán los PDFs
+            logo_path: Ruta al archivo del logo (opcional)
+        """
+        self.pdf_folder = pdf_folder
+        self.logo_path = logo_path
         
-        # Nombre del archivo
-        marca_slug = lead['marca'].replace(' ', '_').lower()
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"reporte_{marca_slug}_{timestamp}.pdf"
-        filepath = os.path.join(output_folder, filename)
+        # Crear carpeta si no existe
+        os.makedirs(pdf_folder, exist_ok=True)
         
-        logger.info(f"📄 Generando PDF: {filename}")
+        logger.info(f"GeneradorPDF inicializado. Carpeta: {pdf_folder}")
+    
+    def generar_reporte(self, lead: dict, analisis: dict) -> str:
+        """
+        Genera un reporte PDF completo
         
-        # Crear documento
-        doc = SimpleDocTemplate(
-            filepath,
-            pagesize=letter,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=1*inch,
-            bottomMargin=1*inch
-        )
+        Args:
+            lead: Diccionario con datos del lead
+            analisis: Diccionario con datos del análisis
         
-        # Contenedor para elementos
-        story = []
-        
-        # Estilos
-        styles = getSampleStyleSheet()
-        
-        # Estilos personalizados
-        titulo_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#2c3e50'),
-            spaceAfter=10,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        )
-        
-        subtitulo_style = ParagraphStyle(
-            'CustomSubtitle',
-            parent=styles['Normal'],
-            fontSize=12,
-            textColor=colors.HexColor('#7f8c8d'),
-            spaceAfter=30,
-            alignment=TA_CENTER
-        )
-        
-        heading2_style = ParagraphStyle(
-            'CustomHeading2',
-            parent=styles['Heading2'],
-            fontSize=16,
-            textColor=colors.HexColor('#2c3e50'),
-            spaceAfter=15,
-            spaceBefore=20,
-            fontName='Helvetica-Bold'
-        )
-        
-        normal_style = ParagraphStyle(
-            'CustomNormal',
-            parent=styles['Normal'],
-            fontSize=10,
-            alignment=TA_JUSTIFY,
-            spaceAfter=10
-        )
-        
-        # =====================================================================
-        # PORTADA
-        # =====================================================================
-        
-        story.append(Spacer(1, 1.5*inch))
-        
-        # Logo (si existe)
-        from config import Config
-        if os.path.exists(Config.PDF_LOGO_PATH):
-            try:
-                logo = Image(Config.PDF_LOGO_PATH, width=2*inch, height=1*inch)
-                logo.hAlign = 'CENTER'
-                story.append(logo)
-                story.append(Spacer(1, 0.3*inch))
-            except:
-                logger.warning("⚠️ No se pudo cargar el logo")
-        
-        story.append(Paragraph("EXAMEN DE VIABILIDAD DE MARCA", titulo_style))
-        story.append(Paragraph("Análisis Profesional de Registro", subtitulo_style))
-        
-        # Información del cliente
-        info_cliente = [
-            ["Cliente:", lead['nombre']],
-            ["Email:", lead['email']],
-            ["Marca solicitada:", f"<b>{lead['marca']}</b>"],
-            ["Clase Niza:", lead.get('clase_sugerida', 'No especificada')],
-            ["Descripción:", lead.get('descripcion', 'N/A')],
-            ["Fecha:", datetime.now().strftime('%d/%m/%Y')]
-        ]
-        
-        tabla_info = Table(info_cliente, colWidths=[2*inch, 4*inch])
-        tabla_info.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#ecf0f1')),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#2c3e50')),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')])
-        ]))
-        
-        story.append(tabla_info)
-        story.append(PageBreak())
-        
-        # =====================================================================
-        # RESULTADO DE VIABILIDAD
-        # =====================================================================
-        
-        story.append(Paragraph("RESULTADO DE VIABILIDAD", heading2_style))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Clasificación
-        categoria, color_viab, descripcion = clasificar_viabilidad(porcentaje_viabilidad)
-        
-        # Porcentaje con color
-        viab_style = ParagraphStyle(
-            'Viabilidad',
-            parent=styles['Normal'],
-            fontSize=60,
-            textColor=color_viab,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold',
-            spaceAfter=10
-        )
-        
-        story.append(Paragraph(f"{porcentaje_viabilidad}%", viab_style))
-        
-        cat_style = ParagraphStyle(
-            'Categoria',
-            parent=styles['Normal'],
-            fontSize=14,
-            textColor=color_viab,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold',
-            spaceAfter=5
-        )
-        
-        story.append(Paragraph(f"VIABILIDAD {categoria}", cat_style))
-        story.append(Paragraph(descripcion, subtitulo_style))
-        
-        # Nivel de riesgo
-        nivel_riesgo = analisis.get('nivel_riesgo', 'MEDIO')
-        story.append(Paragraph(f"<b>Nivel de riesgo:</b> {nivel_riesgo}", normal_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # =====================================================================
-        # MARCAS SIMILARES ENCONTRADAS
-        # =====================================================================
-        
-        story.append(Paragraph("MARCAS SIMILARES ENCONTRADAS", heading2_style))
-        story.append(Paragraph(
-            f"Total de registros detectados en el IMPI: <b>{total_encontradas}</b>",
-            normal_style
-        ))
-        story.append(Spacer(1, 0.1*inch))
-        
-        if marcas_similares:
-            # Mostrar hasta 15 marcas
-            marcas_mostrar = marcas_similares[:15]
+        Returns:
+            Ruta al archivo PDF generado
+        """
+        try:
+            # Sanitizar nombre de marca para nombre de archivo
+            marca_limpia = "".join(c for c in lead.get('marca', 'marca') if c.isalnum() or c in (' ', '-', '_')).strip()
+            marca_limpia = marca_limpia.replace(' ', '_')[:50]
             
-            # Tabla de marcas
-            data_marcas = [['#', 'Denominación', 'Expediente', 'Clase', 'Titular']]
+            # Nombre del archivo
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"reporte_{marca_limpia}_{timestamp}.pdf"
+            filepath = os.path.join(self.pdf_folder, filename)
             
-            for i, marca in enumerate(marcas_mostrar, 1):
-                denominacion = marca.get('denominacion', 'N/A')[:30]
-                expediente = marca.get('expediente', 'N/A')
-                clase = marca.get('clase', 'N/A')
-                titular = marca.get('titular', 'N/A')[:35]
-                
-                data_marcas.append([
-                    str(i),
-                    denominacion,
-                    expediente,
-                    clase,
-                    titular
-                ])
+            logger.info(f"[PDF] Generando: {filename}")
             
-            tabla_marcas = Table(
-                data_marcas,
-                colWidths=[0.3*inch, 1.8*inch, 1*inch, 0.5*inch, 2.4*inch]
+            # Generar HTML
+            html_content = self._generar_html(lead, analisis)
+            
+            # CSS personalizado
+            css_content = self._generar_css()
+            
+            # Configuración de fuentes
+            font_config = FontConfiguration()
+            
+            # Convertir HTML a PDF
+            HTML(string=html_content).write_pdf(
+                filepath,
+                stylesheets=[CSS(string=css_content, font_config=font_config)],
+                font_config=font_config
             )
             
-            tabla_marcas.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#ecf0f1')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')])
-            ]))
+            logger.info(f"✅ PDF generado: {filename}")
+            return filepath
             
-            story.append(tabla_marcas)
-            
-            if len(marcas_similares) > 15:
-                story.append(Spacer(1, 0.1*inch))
-                story.append(Paragraph(
-                    f"<i>... y {len(marcas_similares) - 15} marcas más no mostradas en esta tabla.</i>",
-                    normal_style
-                ))
-        else:
-            story.append(Paragraph(
-                "No se encontraron marcas fonéticamente similares en la base de datos del IMPI.",
-                normal_style
-            ))
+        except Exception as e:
+            logger.error(f"Error generando PDF: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _generar_html(self, lead: dict, analisis: dict) -> str:
+        """
+        Genera el HTML del reporte
+        """
+        marca = lead.get('marca', 'N/A')
+        cliente = lead.get('nombre', 'Cliente')
+        clase = lead.get('clase_sugerida', 'N/A')
         
-        story.append(Spacer(1, 0.3*inch))
+        # Formatear fecha en español
+        meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+                 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+        ahora = datetime.now()
+        fecha_analisis = f"{ahora.day} de {meses[ahora.month-1]} de {ahora.year}"
         
-        # =====================================================================
-        # MARCAS POTENCIALMENTE CONFLICTIVAS
-        # =====================================================================
-        
+        # Datos del análisis
+        viabilidad = analisis.get('porcentaje_viabilidad', 0)
+        nivel_riesgo = analisis.get('nivel_riesgo', 'MEDIO')
+        analisis_principal = analisis.get('analisis_principal', '')
+        factores_riesgo = analisis.get('factores_riesgo', [])
+        factores_favorables = analisis.get('factores_favorables', [])
+        recomendaciones = analisis.get('recomendaciones', [])
         marcas_conflictivas = analisis.get('marcas_conflictivas', [])
         
-        if marcas_conflictivas:
-            story.append(Paragraph("MARCAS POTENCIALMENTE CONFLICTIVAS", heading2_style))
-            story.append(Paragraph(
-                "Las siguientes marcas representan el mayor riesgo de conflicto:",
-                normal_style
-            ))
-            story.append(Spacer(1, 0.1*inch))
-            
-            for i, marca_conf in enumerate(marcas_conflictivas[:5], 1):
-                denom = marca_conf.get('denominacion', 'N/A')
-                exp = marca_conf.get('expediente', 'N/A')
-                razon = marca_conf.get('razon_conflicto', 'N/A')
-                nivel = marca_conf.get('nivel_conflicto', 'N/A')
-                
-                texto = f"""
-                <b>{i}. {denom}</b> (Exp: {exp})<br/>
-                <i>Razón del conflicto:</i> {razon}<br/>
-                <i>Nivel de conflicto:</i> {nivel}
-                """
-                
-                story.append(Paragraph(texto, normal_style))
-                story.append(Spacer(1, 0.1*inch))
+        # Convertir listas a HTML si vienen como strings con saltos de línea
+        if isinstance(factores_riesgo, str):
+            factores_riesgo = [f.strip('• ').strip() for f in factores_riesgo.split('\n') if f.strip()]
+        if isinstance(factores_favorables, str):
+            factores_favorables = [f.strip('• ').strip() for f in factores_favorables.split('\n') if f.strip()]
+        if isinstance(recomendaciones, str):
+            recomendaciones = [r.strip('1234567890. ').strip() for r in recomendaciones.split('\n') if r.strip()]
         
-        story.append(PageBreak())
+        # Color del riesgo
+        color_riesgo = {
+            'BAJO': '#10b981',
+            'MEDIO': '#f59e0b',
+            'ALTO': '#ef4444'
+        }.get(nivel_riesgo.upper(), '#6b7280')
         
-        # =====================================================================
-        # ANÁLISIS Y RECOMENDACIONES
-        # =====================================================================
-        
-        story.append(Paragraph("ANÁLISIS Y RECOMENDACIONES", heading2_style))
-        
-        # Análisis detallado
-        analisis_texto = analisis.get('analisis_detallado', 'No disponible')
-        story.append(Paragraph("<b>Análisis de IA:</b>", normal_style))
-        story.append(Paragraph(analisis_texto, normal_style))
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Factores de riesgo
-        factores_riesgo = analisis.get('factores_riesgo', [])
-        if factores_riesgo:
-            story.append(Paragraph("<b>⚠️ Factores de Riesgo:</b>", normal_style))
-            for factor in factores_riesgo:
-                story.append(Paragraph(f"• {factor}", normal_style))
-            story.append(Spacer(1, 0.1*inch))
-        
-        # Factores favorables
-        factores_favorables = analisis.get('factores_favorables', [])
-        if factores_favorables:
-            story.append(Paragraph("<b>✓ Factores Favorables:</b>", normal_style))
-            for factor in factores_favorables:
-                story.append(Paragraph(f"• {factor}", normal_style))
-            story.append(Spacer(1, 0.1*inch))
-        
-        # Recomendaciones
-        recomendaciones = analisis.get('recomendaciones', [])
-        if recomendaciones:
-            story.append(Spacer(1, 0.2*inch))
-            story.append(Paragraph("<b>💡 Recomendaciones:</b>", normal_style))
-            for i, rec in enumerate(recomendaciones, 1):
-                story.append(Paragraph(f"{i}. {rec}", normal_style))
-        
-        # Notas del experto
-        if notas_experto and notas_experto.strip():
-            story.append(Spacer(1, 0.3*inch))
-            story.append(Paragraph("<b>📝 Notas del Experto:</b>", normal_style))
-            story.append(Paragraph(notas_experto, normal_style))
-        
-        story.append(Spacer(1, 0.5*inch))
-        
-        # =====================================================================
-        # DISCLAIMER
-        # =====================================================================
-        
-        disclaimer_style = ParagraphStyle(
-            'Disclaimer',
-            parent=styles['Normal'],
-            fontSize=9,
-            textColor=colors.HexColor('#7f8c8d'),
-            alignment=TA_JUSTIFY,
-            spaceAfter=5
-        )
-        
-        story.append(Paragraph("<b>DISCLAIMER LEGAL:</b>", disclaimer_style))
-        
-        disclaimer_texto = """
-        Este análisis es orientativo y se basa en la información disponible en la base de datos
-        pública del Instituto Mexicano de la Propiedad Industrial (IMPI) al momento de la consulta.
-        No constituye una garantía de registro ni reemplaza el examen oficial que realizará el IMPI.
-        La decisión final sobre el registro de la marca corresponde exclusivamente al examinador
-        del IMPI. Se recomienda consultar con un abogado especializado en propiedad intelectual
-        antes de proceder con el registro formal.
+        html = f"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reporte de Análisis - {marca}</title>
+</head>
+<body>
+    <!-- HEADER -->
+    <div class="header">
+        <div class="logo-container">
+            <div class="logo-text">MARCA SEGURA</div>
+        </div>
+        <div class="header-title">
+            <h1>Examen de Viabilidad aplicado a la marca<br><strong>{marca}</strong><br>ante el IMPI</h1>
+        </div>
+        <div class="header-info">
+            <p><strong>Fecha:</strong> {fecha_analisis}</p>
+            <p><strong>Cliente:</strong> {cliente}</p>
+            <p><strong>Clase Niza:</strong> {clase}</p>
+        </div>
+    </div>
+    
+    <!-- RESUMEN EJECUTIVO -->
+    <div class="seccion">
+        <h2>Resumen Ejecutivo</h2>
+        <div class="viabilidad-container">
+            <div class="viabilidad-box">
+                <div class="viabilidad-label">Porcentaje de Viabilidad</div>
+                <div class="viabilidad-valor">{viabilidad}%</div>
+            </div>
+            <div class="riesgo-box" style="border-color: {color_riesgo};">
+                <div class="riesgo-label">Nivel de Riesgo</div>
+                <div class="riesgo-valor" style="color: {color_riesgo};">{nivel_riesgo}</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ANÁLISIS DETALLADO -->
+    <div class="seccion">
+        <h2>Análisis Detallado</h2>
+        <div class="texto-analisis">
+            {analisis_principal.replace(chr(10), '<br>')}
+        </div>
+    </div>
+    
+    <!-- MARCAS CONFLICTIVAS -->
+    {self._generar_tabla_marcas(marcas_conflictivas)}
+    
+    <!-- FACTORES DE RIESGO -->
+    {self._generar_lista('Factores de Riesgo', factores_riesgo, 'riesgo')}
+    
+    <!-- FACTORES FAVORABLES -->
+    {self._generar_lista('Factores Favorables', factores_favorables, 'favorable')}
+    
+    <!-- RECOMENDACIONES -->
+    {self._generar_recomendaciones(recomendaciones)}
+    
+    <!-- FOOTER -->
+    <div class="footer">
+        <p>Este reporte ha sido elaborado por MARCA SEGURA</p>
+        <p>Consultores especializados en propiedad intelectual</p>
+        <p>Documento confidencial - Para uso exclusivo del cliente</p>
+    </div>
+</body>
+</html>
         """
         
-        story.append(Paragraph(disclaimer_texto, disclaimer_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Información de contacto
-        contacto_style = ParagraphStyle(
-            'Contacto',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.HexColor('#2c3e50'),
-            alignment=TA_CENTER
-        )
-        
-        story.append(Paragraph("<b>MarcaSegura.com.mx</b>", contacto_style))
-        story.append(Paragraph("gestor@marcasegura.com.mx | WhatsApp: 523331562224", contacto_style))
-        
-        # =====================================================================
-        # CONSTRUIR PDF
-        # =====================================================================
-        
-        doc.build(story, onFirstPage=_crear_encabezado_pie, onLaterPages=_crear_encabezado_pie)
-        
-        logger.info(f"✅ PDF generado exitosamente: {filepath}")
-        
-        return filepath
+        return html
     
-    except Exception as e:
-        logger.error(f"❌ Error generando PDF: {str(e)}", exc_info=True)
-        return None
+    def _generar_tabla_marcas(self, marcas: list) -> str:
+        """Genera la tabla de marcas conflictivas"""
+        if not marcas or len(marcas) == 0:
+            return """
+            <div class="seccion">
+                <h2>Marcas Potencialmente Conflictivas</h2>
+                <p class="no-marcas">No se identificaron marcas conflictivas significativas.</p>
+            </div>
+            """
+        
+        filas = ""
+        for i, marca in enumerate(marcas[:15], 1):
+            denominacion = marca.get('denominacion', 'N/A')
+            expediente = marca.get('expediente', 'N/A')
+            titular = marca.get('titular', 'No especificado')
+            clase = marca.get('clase', 'N/A')
+            estado = marca.get('estado', 'N/A')
+            
+            # Truncar titular si es muy largo
+            if len(titular) > 40:
+                titular = titular[:40] + '...'
+            
+            filas += f"""
+            <tr>
+                <td>{i}</td>
+                <td><strong>{denominacion}</strong></td>
+                <td>{expediente}</td>
+                <td>{titular}</td>
+                <td>{clase}</td>
+                <td><span class="estado-marca">{estado}</span></td>
+            </tr>
+            """
+        
+        return f"""
+        <div class="seccion">
+            <h2>Marcas Potencialmente Conflictivas</h2>
+            <p class="descripcion-tabla">Se han identificado {len(marcas)} marcas registradas que podrían representar un conflicto. A continuación se muestran las más relevantes:</p>
+            <table class="tabla-marcas">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Denominación</th>
+                        <th>Expediente</th>
+                        <th>Titular</th>
+                        <th>Clase</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {filas}
+                </tbody>
+            </table>
+        </div>
+        """
+    
+    def _generar_lista(self, titulo: str, items: list, tipo: str) -> str:
+        """Genera una lista con viñetas"""
+        if not items or len(items) == 0:
+            return ""
+        
+        icono = '⚠' if tipo == 'riesgo' else '✓'
+        color = '#ef4444' if tipo == 'riesgo' else '#10b981'
+        
+        items_html = ""
+        for item in items:
+            items_html += f'<li><span class="icono" style="color: {color};">{icono}</span> {item}</li>'
+        
+        return f"""
+        <div class="seccion">
+            <h2>{titulo}</h2>
+            <ul class="lista-items">
+                {items_html}
+            </ul>
+        </div>
+        """
+    
+    def _generar_recomendaciones(self, recomendaciones: list) -> str:
+        """Genera la sección de recomendaciones"""
+        if not recomendaciones or len(recomendaciones) == 0:
+            return ""
+        
+        items_html = ""
+        for i, rec in enumerate(recomendaciones, 1):
+            items_html += f'<li><strong>{i}.</strong> {rec}</li>'
+        
+        return f"""
+        <div class="seccion recomendaciones">
+            <h2>Recomendaciones</h2>
+            <ol class="lista-recomendaciones">
+                {items_html}
+            </ol>
+        </div>
+        """
+    
+    def _generar_css(self) -> str:
+        """Genera el CSS para el PDF"""
+        return """
+        @page {
+            size: Letter;
+            margin: 2cm 1.5cm;
+            
+            @top-right {
+                content: "Página " counter(page) " de " counter(pages);
+                font-size: 9pt;
+                color: #6b7280;
+            }
+        }
+        
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-size: 11pt;
+            line-height: 1.6;
+            color: #1f2937;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #7c3aed;
+        }
+        
+        .logo-text {
+            font-size: 24pt;
+            font-weight: bold;
+            color: #7c3aed;
+            letter-spacing: 2px;
+        }
+        
+        .header-title h1 {
+            font-size: 18pt;
+            color: #1f2937;
+            margin: 15px 0;
+            line-height: 1.4;
+        }
+        
+        .header-title strong {
+            color: #7c3aed;
+            font-size: 20pt;
+        }
+        
+        .header-info {
+            margin-top: 15px;
+            font-size: 10pt;
+            color: #6b7280;
+        }
+        
+        .seccion {
+            margin-bottom: 25px;
+            page-break-inside: avoid;
+        }
+        
+        h2 {
+            color: #7c3aed;
+            font-size: 14pt;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .viabilidad-container {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+        
+        .viabilidad-box, .riesgo-box {
+            text-align: center;
+            padding: 20px;
+            border: 3px solid #7c3aed;
+            border-radius: 10px;
+            width: 45%;
+        }
+        
+        .viabilidad-valor {
+            font-size: 36pt;
+            font-weight: bold;
+            color: #7c3aed;
+        }
+        
+        .riesgo-valor {
+            font-size: 24pt;
+            font-weight: bold;
+        }
+        
+        .texto-analisis {
+            background-color: #f9fafb;
+            padding: 15px;
+            border-left: 4px solid #7c3aed;
+            border-radius: 5px;
+            font-size: 10pt;
+            line-height: 1.8;
+        }
+        
+        .tabla-marcas {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9pt;
+        }
+        
+        .tabla-marcas thead {
+            background-color: #7c3aed;
+            color: white;
+        }
+        
+        .tabla-marcas th {
+            padding: 10px 8px;
+            text-align: left;
+        }
+        
+        .tabla-marcas td {
+            padding: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .tabla-marcas tbody tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+        
+        .lista-items {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .lista-items li {
+            margin-bottom: 10px;
+            padding-left: 30px;
+            position: relative;
+        }
+        
+        .lista-items .icono {
+            position: absolute;
+            left: 0;
+            font-size: 14pt;
+        }
+        
+        .recomendaciones {
+            background-color: #fef3c7;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #f59e0b;
+        }
+        
+        .lista-recomendaciones {
+            padding-left: 0;
+            list-style: none;
+        }
+        
+        .lista-recomendaciones li {
+            margin-bottom: 12px;
+        }
+        
+        .lista-recomendaciones strong {
+            color: #f59e0b;
+        }
+        
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+            font-size: 9pt;
+            color: #6b7280;
+        }
+        """
