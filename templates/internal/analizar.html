@@ -197,7 +197,8 @@ async function iniciarAnalisis() {
             body: JSON.stringify({
                 marca_consulta: resultadoBusqueda.marca_consultada,
                 clase_consulta: resultadoBusqueda.clase_consultada,
-                marcas_encontradas: resultadoBusqueda.marcas
+                marcas_encontradas: resultadoBusqueda.marcas,
+                lead_id: lead.id
             })
         });
         
