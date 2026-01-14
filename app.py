@@ -637,20 +637,32 @@ def api_analizar_gemini():
 def revision(lead_id):
     """Página de revisión y edición pre-PDF"""
     try:
+        logger.info(f"[REVISION] Cargando revisión para lead {lead_id}")
+        
         lead = sheets_client.obtener_lead_por_id(lead_id)
         
         if not lead:
+            logger.error(f"[REVISION] Lead #{lead_id} no encontrado")
             flash(f'Lead #{lead_id} no encontrado', 'error')
             return redirect(url_for('dashboard'))
         
-        # Obtener análisis de la sesión o DB
+        logger.info(f"[REVISION] Lead encontrado: {lead.get('marca')}")
+        
+        # Obtener análisis de la sesión
         analisis = session.get(f'analisis_{lead_id}')
         
+        logger.info(f"[REVISION] Análisis en sesión: {'Sí' if analisis else 'No'}")
+        if analisis:
+            logger.info(f"[REVISION] Campos del análisis: {list(analisis.keys())}")
+        
         if not analisis:
+            logger.warning(f"[REVISION] No hay análisis en sesión para lead {lead_id}")
             flash('No hay análisis disponible. Realiza el análisis primero.', 'warning')
             return redirect(url_for('iniciar_analisis', lead_id=lead_id))
         
         usuario_actual = obtener_usuario_actual()
+        
+        logger.info(f"[REVISION] Renderizando template con análisis de {analisis.get('marca_consultada')}")
         
         return render_template(
             'internal/revision.html',
@@ -662,6 +674,8 @@ def revision(lead_id):
         
     except Exception as e:
         logger.error(f"Error en revision: {e}")
+        import traceback
+        traceback.print_exc()
         flash(f'Error al cargar revisión: {str(e)}', 'error')
         return redirect(url_for('dashboard'))
 
