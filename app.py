@@ -755,20 +755,70 @@ def download_pdf(filename):
     try:
         pdf_path = os.path.join(Config.PDF_FOLDER, filename)
         
+        logger.info(f"[DOWNLOAD PDF] Solicitado: {filename}")
+        logger.info(f"[DOWNLOAD PDF] Ruta completa: {pdf_path}")
+        logger.info(f"[DOWNLOAD PDF] Existe: {os.path.exists(pdf_path)}")
+        
         if not os.path.exists(pdf_path):
+            logger.error(f"[DOWNLOAD PDF] Archivo no encontrado: {pdf_path}")
             flash('PDF no encontrado', 'error')
             return redirect(url_for('dashboard'))
+        
+        # Obtener tamaño del archivo
+        file_size = os.path.getsize(pdf_path)
+        logger.info(f"[DOWNLOAD PDF] Tamaño: {file_size} bytes")
+        
+        # Nombre más amigable para descarga
+        # De: reporte_transformadores_ras_20260114_012345.pdf
+        # A: Reporte_Transformadores_Ras.pdf
+        marca_simple = filename.replace('reporte_', '').split('_202')[0]
+        download_name = f"Reporte_{marca_simple}.pdf"
+        
+        logger.info(f"[DOWNLOAD PDF] ✓ Enviando archivo: {download_name}")
         
         return send_file(
             pdf_path,
             as_attachment=True,
-            download_name=filename,
+            download_name=download_name,
             mimetype='application/pdf'
         )
         
     except Exception as e:
         logger.error(f"Error en download_pdf: {e}")
+        import traceback
+        traceback.print_exc()
         flash(f'Error al descargar PDF: {str(e)}', 'error')
+        return redirect(url_for('dashboard'))
+
+
+@app.route('/ver-pdf/<filename>')
+@login_required
+def ver_pdf(filename):
+    """Ver PDF en el navegador (sin forzar descarga)"""
+    try:
+        pdf_path = os.path.join(Config.PDF_FOLDER, filename)
+        
+        logger.info(f"[VER PDF] Solicitado: {filename}")
+        
+        if not os.path.exists(pdf_path):
+            logger.error(f"[VER PDF] Archivo no encontrado: {pdf_path}")
+            flash('PDF no encontrado', 'error')
+            return redirect(url_for('dashboard'))
+        
+        logger.info(f"[VER PDF] ✓ Mostrando en navegador")
+        
+        # as_attachment=False para mostrar en el navegador
+        return send_file(
+            pdf_path,
+            as_attachment=False,
+            mimetype='application/pdf'
+        )
+        
+    except Exception as e:
+        logger.error(f"Error en ver_pdf: {e}")
+        import traceback
+        traceback.print_exc()
+        flash(f'Error al ver PDF: {str(e)}', 'error')
         return redirect(url_for('dashboard'))
 
 
