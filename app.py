@@ -840,15 +840,17 @@ def api_crear_lead():
         # Guardar en Sheet
         resultado = sheets_client.agregar_lead(datos_lead)
         
-        if not resultado:
+        if not resultado or (isinstance(resultado, dict) and not resultado.get('success')):
             return jsonify({"success": False, "error": "Error al guardar lead"}), 500
         
-        logger.info(f"[CREAR LEAD] ✓ Lead creado manualmente: {datos_lead['nombre']} - {datos_lead['marca']}")
+        lead_id = resultado.get('id') if isinstance(resultado, dict) else None
+        
+        logger.info(f"[CREAR LEAD] ✓ Lead creado manualmente: {datos_lead['nombre']} - {datos_lead['marca']} (ID: {lead_id})")
         
         return jsonify({
             "success": True,
             "mensaje": "Lead creado correctamente",
-            "lead_id": resultado.get('id')
+            "lead_id": lead_id
         })
         
     except Exception as e:
