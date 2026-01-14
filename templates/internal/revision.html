@@ -240,6 +240,7 @@
 {% block extra_js %}
 <script>
 const lead = {{ lead|tojson }};
+const analisisServer = {{ analisis|tojson }};  // Análisis desde el servidor
 let resultadoBusqueda = null;
 let analisisGemini = null;
 let pdfGenerado = null;
@@ -247,10 +248,23 @@ let pdfGenerado = null;
 // Cargar datos del análisis
 window.addEventListener('DOMContentLoaded', () => {
     try {
-        resultadoBusqueda = JSON.parse(sessionStorage.getItem('resultadoBusqueda'));
-        analisisGemini = JSON.parse(sessionStorage.getItem('analisisGemini'));
+        // Primero intentar desde sessionStorage (si viene de analizar.html)
+        resultadoBusqueda = JSON.parse(sessionStorage.getItem('resultadoBusqueda') || 'null');
+        analisisGemini = JSON.parse(sessionStorage.getItem('analisisGemini') || 'null');
         
-        if (!resultadoBusqueda || !analisisGemini) {
+        // Si no están en sessionStorage, usar datos del servidor
+        if (!analisisGemini && analisisServer) {
+            console.log('Usando análisis desde el servidor');
+            analisisGemini = analisisServer;
+            // Crear un resultadoBusqueda mínimo
+            resultadoBusqueda = {
+                marca_consultada: analisisServer.marca_consultada,
+                clase_consultada: analisisServer.clase_consultada,
+                marcas: analisisServer.marcas_conflictivas || []
+            };
+        }
+        
+        if (!analisisGemini) {
             alert('No se encontraron datos del análisis. Redirigiendo...');
             window.location.href = "{{ url_for('iniciar_analisis', lead_id=lead.id) }}?auto=true";
             return;
@@ -262,7 +276,8 @@ window.addEventListener('DOMContentLoaded', () => {
         
     } catch (error) {
         console.error('Error cargando datos:', error);
-        alert('Error cargando datos del análisis');
+        console.error('Stack:', error.stack);
+        alert('Error cargando datos del análisis: ' + error.message);
     }
 });
 
