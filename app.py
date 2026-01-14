@@ -472,10 +472,22 @@ def api_buscar_impi():
         if not marca:
             return jsonify({"success": False, "error": "Marca requerida"}), 400
         
-        logger.info(f"\n[BÚSQUEDA FONÉTICA] Marca: {marca}, Clase: {clase}")
+        # Parsear clase: extraer número de strings como "Clase 9: ..." o "45"
+        clase_niza = None
+        if clase:
+            if isinstance(clase, int):
+                clase_niza = clase
+            elif isinstance(clase, str):
+                # Intentar extraer número del formato "Clase 9: Descripción"
+                import re
+                match = re.search(r'\d+', clase)
+                if match:
+                    clase_niza = int(match.group())
+        
+        logger.info(f"\n[BÚSQUEDA FONÉTICA] Marca: {marca}, Clase original: {clase}, Clase parseada: {clase_niza}")
         
         # Ejecutar búsqueda fonética (puede tardar ~30 seg)
-        resultado = buscador_impi.buscar_fonetica(marca, clase_niza=clase if clase else None)
+        resultado = buscador_impi.buscar_fonetica(marca, clase_niza=clase_niza)
         
         if not resultado.exito:
             return jsonify({
@@ -519,7 +531,18 @@ def api_analizar_gemini():
         if not marca_consulta or not marcas_encontradas:
             return jsonify({"success": False, "error": "Datos incompletos"}), 400
         
-        logger.info(f"\n[ANÁLISIS GEMINI] Marca: {marca_consulta}, Total marcas: {len(marcas_encontradas)}")
+        # Parsear clase: extraer número de strings como "Clase 9: ..." o "45"
+        clase_niza = None
+        if clase_consulta:
+            if isinstance(clase_consulta, int):
+                clase_niza = clase_consulta
+            elif isinstance(clase_consulta, str):
+                import re
+                match = re.search(r'\d+', clase_consulta)
+                if match:
+                    clase_niza = int(match.group())
+        
+        logger.info(f"\n[ANÁLISIS GEMINI] Marca: {marca_consulta}, Clase: {clase_niza}, Total marcas: {len(marcas_encontradas)}")
         
         # Reconstruir objetos MarcaInfo desde los diccionarios
         marcas_objetos = []
@@ -542,7 +565,7 @@ def api_analizar_gemini():
         from datetime import datetime
         resultado_busqueda = ResultadoBusqueda(
             marca_consultada=marca_consulta,
-            clase_consultada=int(clase_consulta) if clase_consulta else None,
+            clase_consultada=clase_niza,
             fecha_busqueda=datetime.now(),
             marcas_encontradas=marcas_objetos,
             exito=True,
