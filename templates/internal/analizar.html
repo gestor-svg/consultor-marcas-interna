@@ -195,8 +195,9 @@ async function iniciarAnalisis() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                resultado_busqueda: resultadoBusqueda,
-                descripcion: lead.descripcion
+                marca_consulta: resultadoBusqueda.marca_consultada,
+                clase_consulta: resultadoBusqueda.clase_consultada,
+                marcas_encontradas: resultadoBusqueda.marcas
             })
         });
         
@@ -205,13 +206,14 @@ async function iniciarAnalisis() {
         const dataGemini = await responseGemini.json();
         
         if (!responseGemini.ok || dataGemini.error) {
-            throw new Error(dataGemini.mensaje || 'Error en análisis Gemini');
+            throw new Error(dataGemini.error || 'Error en análisis Gemini');
         }
         
-        analisisGemini = dataGemini.analisis;
+        // El backend retorna el análisis directamente (sin .analisis)
+        analisisGemini = dataGemini;
         
         actualizarProgreso('progress-gemini', 100);
-        actualizarStatus('status-gemini', '✓ Análisis completado exitosamente');
+        actualizarStatus('status-gemini', `✓ Análisis completado: ${analisisGemini.porcentaje_viabilidad}% de viabilidad`);
         
         await new Promise(resolve => setTimeout(resolve, 1000));
         
