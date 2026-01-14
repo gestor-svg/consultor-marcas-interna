@@ -380,6 +380,21 @@
     </style>
 </head>
 <body>
+    <!-- Botón de acceso al sistema interno (esquina superior derecha) -->
+    {% if usuario_autenticado %}
+    <div style="position: fixed; top: 20px; right: 20px; z-index: 1000;">
+        <a href="{{ url_for('dashboard') }}" style="background: #7c3aed; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <i class="fas fa-tachometer-alt"></i> Dashboard
+        </a>
+    </div>
+    {% else %}
+    <div style="position: fixed; top: 20px; right: 20px; z-index: 1000;">
+        <a href="{{ url_for('login') }}" style="background: #6b7280; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <i class="fas fa-lock"></i> Login
+        </a>
+    </div>
+    {% endif %}
+    
     <div class="container">
         <div class="header">
             <div class="logo">
