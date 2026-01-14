@@ -242,6 +242,51 @@ class GoogleSheetsClient:
             logger.error(f"Error actualizando lead: {str(e)}")
             return False
     
+    def actualizar_lead_por_id(
+        self,
+        lead_id: int,
+        campos: Dict
+    ) -> bool:
+        """
+        Actualiza un lead por su ID
+        
+        Args:
+            lead_id: ID del lead
+            campos: Diccionario con campos a actualizar
+        
+        Returns:
+            True si se actualizó correctamente
+        """
+        
+        try:
+            data = {
+                'action': 'updateLeadById',
+                'leadId': lead_id,
+                **campos
+            }
+            
+            logger.info(f"Actualizando lead ID {lead_id}: {list(campos.keys())}")
+            
+            response = requests.post(
+                self.apps_script_url,
+                json=data,
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            if result.get('success'):
+                logger.info(f"✅ Lead {lead_id} actualizado")
+                return True
+            else:
+                logger.error(f"Error actualizando lead: {result.get('error')}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Error actualizando lead por ID: {str(e)}")
+            return False
+    
     def marcar_analizado(
         self,
         email: str,

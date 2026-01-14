@@ -589,15 +589,36 @@ def api_analizar_gemini():
         # Convertir a diccionario para JSON
         analisis_dict = analisis.to_dict()
         
-        # Guardar en sesión para usar en /revision/
+        # Actualizar lead en Google Sheets
         if lead_id:
-            session[f'analisis_{lead_id}'] = analisis_dict
-            session[f'resultado_busqueda_{lead_id}'] = {
-                'marca_consultada': marca_consulta,
-                'clase_consultada': clase_niza,
-                'marcas': marcas_encontradas
+            try:
+                # Marcar como analizado y agregar nota
+                nota_analisis = f"Viabilidad: {analisis.porcentaje_viabilidad}% - Riesgo: {analisis.nivel_riesgo}"
+                sheets_client.actualizar_lead_por_id(
+                    lead_id=lead_id,
+                    campos={
+                        'analizado': True,
+                        'notas': nota_analisis
+                    }
+                )
+                logger.info(f"[ANÁLISIS GEMINI] Lead {lead_id} actualizado en Sheets")
+            except Exception as e:
+                logger.error(f"[ANÁLISIS GEMINI] Error actualizando lead en Sheets: {e}")
+            
+            # Guardar versión MÍNIMA en sesión (solo metadatos, sin texto largo)
+            analisis_sesion = {
+                'marca_consultada': analisis_dict['marca_consultada'],
+                'clase_consultada': analisis_dict['clase_consultada'],
+                'porcentaje_viabilidad': analisis_dict['porcentaje_viabilidad'],
+                'nivel_riesgo': analisis_dict['nivel_riesgo'],
+                'marcas_conflictivas': analisis_dict['marcas_conflictivas'][:5],  # Solo top 5
+                'recomendaciones': analisis_dict['recomendaciones'][:3],  # Solo 3 primeras
+                'factores_riesgo': analisis_dict['factores_riesgo'][:3],
+                'fecha_analisis': analisis_dict['fecha_analisis'],
+                'lead_id': lead_id
             }
-            logger.info(f"[ANÁLISIS GEMINI] Guardado en session: analisis_{lead_id}")
+            session[f'analisis_{lead_id}'] = analisis_sesion
+            logger.info(f"[ANÁLISIS GEMINI] Guardado en session (versión resumida)")
         
         return jsonify({
             "success": True,
